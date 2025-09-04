@@ -1,0 +1,80 @@
+# Common cache, logs and temporary files
+.cache/
+/tmp/
+*.tmp
+*.bak
+*.swp
+*.log
+
+# Specific application caches/dependencies
+/node_modules/
+/vendor/
+__pycache__/
+
+# System files that shouldn't be backed up
+/lost+found/
+.DS_Store
+Thumbs.db
+
+# User profile files (usually not needed in backups)
+.bash_history
+.bash_logout
+.bashrc
+.config/
+.docker/
+.local/
+.profile
+.ssh/
+.sudo_as_admin_successful
+.wget-hsts
+
+# System directories (for full system backups)
+/dev/
+/proc/
+/sys/
+/run/
+/mnt/
+/media/
+
+# Log directories
+/var/log/
+/var/cache/
+/var/tmp/
+
+# Database files (backup separately)
+*.db-shm
+*.db-wal
+
+# Browser caches
+.mozilla/firefox/*/Cache/
+.google-chrome/Default/Cache/
+Library/Caches/
+
+# Development files
+.git/objects/
+.svn/
+.hg/
+*.pyc
+*.pyo
+*.class
+
+# Archive files that don't compress well
+*.zip
+*.rar
+*.7z
+*.gz
+*.bz2
+
+# Video files (large and already compressed)
+*.mp4
+*.avi
+*.mkv
+*.mov
+*.wmv
+
+# VM and container images
+*.vmdk
+*.vdi
+*.qcow2
+*.img
+*.iso
