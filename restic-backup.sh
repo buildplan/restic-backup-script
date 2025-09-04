@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =================================================================
-#         Restic Backup Script v0.05 - 2025.09.02
+#         Restic Backup Script v0.06 - 2025.09.04
 # =================================================================
 # Based on rsync backup script but using restic for encrypted backups
 # Provides similar functionality with client-side encryption
@@ -84,15 +84,15 @@ check_and_install_restic() {
     fi
 
     # Get the latest version tag from GitHub API
-    local latest_version_tag
-    latest_version_tag=$(curl -s "https://api.github.com/repos/restic/restic/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-    if [ -z "$latest_version_tag" ]; then
+    local latest_version
+    latest_version=$(curl -s "https://api.github.com/repos/restic/restic/releases/latest" | grep -o '"tag_name": "[^"]*"' | sed -E 's/.*"v?([^"]+)".*/\1/')
+
+    if [ -z "$latest_version" ]; then
         echo -e "${C_YELLOW}Could not fetch latest restic version from GitHub. Skipping update check.${C_RESET}"
         return 0
     fi
-    local latest_version="${latest_version_tag#v}"
 
-    # Get the currently installed version, if any
+    # Get the currently installed version
     local local_version=""
     if command -v restic &>/dev/null; then
         local_version=$(restic version | head -n1 | awk '{print $2}')
@@ -131,6 +131,7 @@ check_and_install_restic() {
             return 1
             ;;
     esac
+    local latest_version_tag="v${latest_version}"
     local filename="restic_${latest_version}_linux_${arch_suffix}.bz2"
     local download_url="https://github.com/restic/restic/releases/download/${latest_version_tag}/${filename}"
     echo "Downloading from $download_url..."
