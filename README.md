@@ -79,16 +79,16 @@ You can install all required packages with a single command.
 **On Debian or Ubuntu:**
 
 ```sh
-sudo apt-get update && sudo apt-get install -y restic curl bzip2 util-linux coreutils less
+sudo apt-get update && sudo apt-get install -y restic jq curl bzip2 util-linux coreutils less
 ```
 
 **On CentOS, RHEL, or Fedora:**
 
 ```sh
-sudo dnf install -y restic curl bzip2 util-linux coreutils less
+sudo dnf install -y restic jq curl bzip2 util-linux coreutils less
 ```
 
-Next, download and install the latest version of `restic`. 
+You could also download and install the latest version of `restic`. 
 
 **Note:** While `restic` can be installed from your system's package manager, it is often an older version. It is **recommended** to install it manually or allow the script's built-in auto-updater to fetch the latest official version for you.
 
@@ -115,6 +115,7 @@ sudo mv restic_* /usr/local/bin/restic
 | Package       | Required For                                                                                                         |
 | :------------ | :------------------------------------------------------------------------------------------------------------------- |
 | **`restic`** | The core backup tool used for all repository operations (backup, restore, check, forget).                          |
+| **`jq`** | Parsing JSON for diff function to show difference between last two snapshots.                            |
 | **`curl`** | Sending notifications to ntfy/Discord and fetching the latest version information from the GitHub API.      |
 | **`bzip2`** | Decompressing the `restic` binary when using the auto-install/update feature.                             |
 | **`util-linux`** | Provides `flock` for preventing concurrent script runs and `ionice` for setting I/O priority.          |
