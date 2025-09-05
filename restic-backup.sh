@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#         Restic Backup Script v0.07 - 2025.09.05
+#         Restic Backup Script v0.08 - 2025.09.05
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.07"
+SCRIPT_VERSION="0.08"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -52,14 +52,12 @@ check_for_script_update() {
     echo -e "${C_BOLD}--- Checking for script updates ---${C_RESET}"
     local remote_version
     remote_version=$(curl -sL "$SCRIPT_URL" | grep 'SCRIPT_VERSION=' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
-
     if [ -z "$remote_version" ] || [[ "$remote_version" == "$SCRIPT_VERSION" ]]; then
         echo -e "${C_GREEN}✅ Script is up to date (version $SCRIPT_VERSION).${C_RESET}"
         return 0
     fi
     echo -e "${C_YELLOW}A new version of this script is available ($remote_version). You are running $SCRIPT_VERSION.${C_RESET}"
     read -p "Would you like to download and update now? (y/n): " confirm
-
     if [[ "${confirm,,}" != "y" && "${confirm,,}" != "yes" ]]; then
         echo "Skipping update."
         return 0
@@ -71,6 +69,24 @@ check_for_script_update() {
         rm -f "$temp_file"
         return 1
     fi
+    echo "Verifying downloaded file integrity..."
+    local CHECKSUM_URL="${SCRIPT_URL}.sha256"
+    local remote_hash
+    remote_hash=$(curl -sL "$CHECKSUM_URL" | awk '{print $1}')
+    if [ -z "$remote_hash" ]; then
+        echo -e "${C_RED}Could not download checksum file. Aborting update.${C_RESET}" >&2
+        rm -f "$temp_file"
+        return 1
+    fi
+    local local_hash
+    local_hash=$(sha256sum "$temp_file" | awk '{print $1}')
+    if [[ "$local_hash" != "$remote_hash" ]]; then
+        echo -e "${C_RED}FATAL: Checksum mismatch! File may be corrupt or tampered with.${C_RESET}" >&2
+        echo -e "${C_RED}Aborting update for security reasons.${C_RESET}" >&2
+        rm -f "$temp_file"
+        return 1
+    fi
+    echo -e "${C_GREEN}✅ Checksum verified successfully.${C_RESET}"
     if ! grep -q "#!/bin/bash" "$temp_file"; then
          echo -e "${C_RED}Downloaded file does not appear to be a valid script. Aborting update.${C_RESET}" >&2
          rm -f "$temp_file"
