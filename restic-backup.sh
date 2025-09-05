@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#         Restic Backup Script v0.09 - 2025.09.05
+#         Restic Backup Script v0.10 - 2025.09.05
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.09"
+SCRIPT_VERSION="0.10"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -94,7 +94,7 @@ check_for_script_update() {
     fi
     chmod +x "$temp_file"
     mv "$temp_file" "$0"
-    if [ -n "${SUDO_USER:-}" ]; then
+    if [ -n "${SUDO_USER:-}" ] && [[ "$SCRIPT_DIR" != /root* ]]; then
         chown "${SUDO_USER}:${SUDO_GID:-$SUDO_USER}" "$0"
     fi
     echo -e "${C_GREEN}✅ Script updated successfully to version $remote_version. Please run the command again.${C_RESET}"
