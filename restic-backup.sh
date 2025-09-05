@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#         Restic Backup Script v0.10 - 2025.09.05
+#         Restic Backup Script v0.11 - 2025.09.05
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.10"
+SCRIPT_VERSION="0.11"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -220,6 +220,37 @@ log_message() {
     if [[ "${VERBOSE_MODE:-false}" == "true" ]]; then
         echo -e "$message"
     fi
+}
+
+run_summary() {
+    echo -e "${C_BOLD}--- Generating Backup Summary ---${C_RESET}"
+    log_message "Generating backup summary (diff)"
+    local latest_snapshots
+    latest_snapshots=($(restic snapshots --host "$HOSTNAME" --latest 2 --json | grep '"short_id"' | sed -E 's/.*"([^"]+)".*/\1/'))
+    if [ "${#latest_snapshots[@]}" -lt 2 ]; then
+        echo -e "${C_YELLOW}Not enough snapshots to create a summary. At least two are required.${C_RESET}"
+        log_message "Summary skipped: less than 2 snapshots available."
+        return 0
+    fi
+    local snap_new="${latest_snapshots[0]}"
+    local snap_old="${latest_snapshots[1]}"
+    echo -e "${C_DIM}Comparing snapshot ${snap_old} (older) with ${snap_new} (newer)...${C_RESET}"
+    local diff_summary
+    diff_summary=$(restic diff "${snap_old}" "${snap_new}")
+    if [ -z "$diff_summary" ]; then
+        diff_summary="No changes detected between the last two backups."
+    fi
+    echo -e "\n${C_BOLD}--- Diff Summary ---${C_RESET}"
+    echo "$diff_summary"
+    echo -e "${C_BOLD}--------------------${C_RESET}"
+    local notification_title="Backup Summary: $HOSTNAME"
+    local notification_message
+    printf -v notification_message "Comparison between snapshots %s (older) and %s (newer):\n\n\`\`\`\n%s\n\`\`\`" \
+        "$snap_old" "$snap_new" "$diff_summary"
+    send_notification "$notification_title" "page_facing_up" \
+        "${NTFY_PRIORITY_SUCCESS}" "success" "$notification_message"
+    log_message "Backup summary sent successfully."
+    echo -e "${C_GREEN}✅ Backup summary sent.${C_RESET}"
 }
 
 send_ntfy() {
@@ -572,7 +603,7 @@ run_restore() {
     # Ask for specific paths to include
     local include_paths=()
     read -p "Optional: Enter specific file(s) to restore, separated by spaces (leave blank for full restore): " -a include_paths
-    
+
     local restic_cmd=(restic restore "$snapshot_id" --target "$restore_dest" --verbose)
 
     # Add --include flags if paths were provided
@@ -699,6 +730,10 @@ case "${1:-}" in
     --forget)
         run_preflight_checks
         run_forget
+        ;;
+    --summary)
+        run_preflight_checks "summary"
+        run_summary
         ;;
     *)
         # Default: full backup
