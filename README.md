@@ -9,11 +9,11 @@ This script automates encrypted, deduplicated backups of local directories to a 
   - **Client-Side Encryption**: All data is encrypted on your server *before* being uploaded, ensuring zero-knowledge privacy from the storage provider.
   - **Deduplication & Compression**: Saves significant storage space by only storing unique data blocks and applying compression.
   - **Snapshot-Based Backups**: Creates point-in-time snapshots, allowing you to easily browse and restore files from any backup date.
-  - **Advanced Retention Policies**: Sophisticated rules to automatically keep daily, weekly, monthly, and yearly snapshots, replacing a simple recycle bin.
+  - **Advanced Retention Policies**: Sophisticated rules to automatically keep daily, weekly, monthly, and yearly snapshots.
   - **Unified Configuration**: All settings are managed in a single, easy-to-edit `restic-backup.conf` file.
   - **Notification Support**: Sends detailed success, warning, or failure notifications to ntfy and/or Discord.
   - **System Friendly**: Uses `nice` and `ionice` to minimize CPU and I/O impact during backups.
-  - **Multiple Operation Modes**: Supports standard backups, dry runs, integrity checks, and a safe, interactive restore mode with file browsing and confirmation.
+  - **Multiple Operation Modes**: Supports standard backups, dry runs, integrity checks, difference summaries, and a safe, interactive restore mode. 
   - **Concurrency Control & Logging**: Prevents multiple instances from running simultaneously and handles its own log rotation.
   - **Pre-run Validation**: Performs checks for required commands and repository connectivity before execution.
 
@@ -30,6 +30,7 @@ This script automates encrypted, deduplicated backups of local directories to a 
   - `sudo ./restic-backup.sh --test` - Validate configuration, permissions, and SSH connectivity.
   - `sudo ./restic-backup.sh --restore` - Start the interactive restore wizard.
   - `sudo ./restic-backup.sh --forget` - Manually apply the retention policy and prune old data.
+  - `sudo ./restic-backup.sh --diff` - Show a summary of changes between the last two snapshots. 
   - `sudo ./restic-backup.sh --init` - (One-time setup) Initialize the remote repository.
 
 > *Default log location: `/var/log/restic-backup.log`*
@@ -232,7 +233,7 @@ To run the backup automatically, edit the root crontab.
     sudo crontab -e
     ```
 
-2.  Add a line to schedule the script. This example runs the backup every day at 3:00 AM.
+2.  Add the following lines to schedule your backups and maintenance. 
 
     ```crontab
     # Define a safe PATH that includes the location of restic
@@ -241,7 +242,7 @@ To run the backup automatically, edit the root crontab.
     # Run the Restic backup every day at 3:00 AM
     0 3 * * * /root/scripts/backup/restic-backup.sh > /dev/null 2>&1
  
-    # Weekly prune cron job for to run every Sunday at 4 AM
+    # Run the retention/prune job every Sunday at 4:00 AM 
     0 4 * * 0 /root/scripts/backup/restic-backup.sh --forget > /dev/null 2>&1
 
     ```
