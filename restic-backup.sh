@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#         Restic Backup Script v0.13 - 2025.09.05
+#         Restic Backup Script v0.14 - 2025.09.05
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.13"
+SCRIPT_VERSION="0.14"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -136,80 +136,107 @@ check_and_install_restic() {
     echo -e "${C_BOLD}--- Checking Restic Version ---${C_RESET}"
 
     # Check for dependencies
-    if ! command -v bzip2 &>/dev/null || ! command -v curl &>/dev/null; then
-        echo -e "${C_RED}ERROR: 'bzip2' and 'curl' are required for auto-installation.${C_RESET}" >&2
-        echo -e "${C_YELLOW}Please install them with: sudo apt-get install bzip2 curl${C_RESET}" >&2
+    if ! command -v bzip2 &>/dev/null || ! command -v curl &>/dev/null || ! command -v gpg &>/dev/null; then
+        echo -e "${C_RED}ERROR: 'bzip2', 'curl', and 'gpg' are required for secure auto-installation.${C_RESET}" >&2
+        echo -e "${C_YELLOW}Please install them with: sudo apt-get install bzip2 curl gnupg${C_RESET}" >&2
         exit 1
     fi
 
-    # Get the latest version tag from GitHub API
     local latest_version
     latest_version=$(curl -s "https://api.github.com/repos/restic/restic/releases/latest" | grep -o '"tag_name": "[^"]*"' | sed -E 's/.*"v?([^"]+)".*/\1/')
-
     if [ -z "$latest_version" ]; then
-        echo -e "${C_YELLOW}Could not fetch latest restic version from GitHub. Skipping update check.${C_RESET}"
+        echo -e "${C_YELLOW}Could not fetch latest restic version from GitHub. Skipping check.${C_RESET}"
         return 0
     fi
 
-    # Get the currently installed version
     local local_version=""
     if command -v restic &>/dev/null; then
         local_version=$(restic version | head -n1 | awk '{print $2}')
     fi
 
-    # Compare versions
     if [[ "$local_version" == "$latest_version" ]]; then
         echo -e "${C_GREEN}✅ Restic is up to date (version $local_version).${C_RESET}"
         return 0
     fi
 
     echo -e "${C_YELLOW}A new version of Restic is available ($latest_version). Current version is ${local_version:-not installed}.${C_RESET}"
-
-    # Check if running in an interactive terminal
     if [ -t 1 ]; then
-        # Interactive mode: Ask the user for confirmation
         read -p "Would you like to download and install it? (y/n): " confirm
         if [[ "${confirm,,}" != "y" && "${confirm,,}" != "yes" ]]; then
             echo "Skipping installation."
             return 0
         fi
     else
-        # Non-interactive mode (cron): Log and skip installation
-        log_message "New Restic version $latest_version available. Skipping interactive install in cron mode. Please update manually."
+        log_message "New Restic version $latest_version available. Skipping interactive install in cron mode."
         echo "Skipping interactive installation in non-interactive mode (cron)."
         return 0
     fi
-    local arch
-    arch=$(uname -m)
+    
+    # Official restic signing key (documented fingerprint)
+    local restic_fpr="CF8F18F2844575973F79D4E191A6868BD3F7A907"
+
+    # Import key if missing (by fingerprint)
+    if ! gpg --list-keys "$restic_fpr" >/dev/null 2>&1; then
+        echo "Importing restic PGP key (fingerprint $restic_fpr)..."
+        if ! gpg --keyserver hkps://keys.openpgp.org --recv-keys "$restic_fpr"; then
+            echo -e "${C_RED}Failed to import restic PGP key. Aborting update.${C_RESET}" >&2
+            return 1
+        fi
+    fi
+
+    # Determine architecture and URLs
+    local arch=$(uname -m)
     local arch_suffix=""
     case "$arch" in
         x86_64) arch_suffix="amd64" ;;
         aarch64) arch_suffix="arm64" ;;
-        *)
-            echo -e "${C_RED}Unsupported architecture '$arch'. Please install Restic manually.${C_RESET}" >&2
-            return 1
-            ;;
+        *) echo -e "${C_RED}Unsupported architecture '$arch'.${C_RESET}" >&2; return 1 ;;
     esac
     local latest_version_tag="v${latest_version}"
     local filename="restic_${latest_version}_linux_${arch_suffix}.bz2"
-    local download_url="https://github.com/restic/restic/releases/download/${latest_version_tag}/${filename}"
-    echo "Downloading from $download_url..."
-    local temp_file
-    temp_file=$(mktemp)
-    if ! curl -sL -o "$temp_file" "$download_url"; then
-        echo -e "${C_RED}Download failed. Please try installing manually.${C_RESET}" >&2
-        rm -f "$temp_file"
+    local base_url="https://github.com/restic/restic/releases/download/${latest_version_tag}"
+
+    # Download artifacts
+    echo "Downloading Restic binary, checksums, and signature..."
+    local temp_binary temp_checksums temp_signature
+    temp_binary=$(mktemp) && temp_checksums=$(mktemp) && temp_signature=$(mktemp)
+    curl -sL -o "$temp_binary"   "${base_url}/${filename}"       || { echo "Download failed"; rm -f "$temp_binary" "$temp_checksums" "$temp_signature"; return 1; }
+    curl -sL -o "$temp_checksums" "${base_url}/SHA256SUMS"      || { echo "Download failed"; rm -f "$temp_binary" "$temp_checksums" "$temp_signature"; return 1; }
+    curl -sL -o "$temp_signature" "${base_url}/SHA256SUMS.asc"  || { echo "Download failed"; rm -f "$temp_binary" "$temp_checksums" "$temp_signature"; return 1; }
+
+    # Verify signature of checksums
+    echo "Verifying checksum signature..."
+    if ! gpg --verify "$temp_signature" "$temp_checksums" >/dev/null 2>&1; then
+        echo -e "${C_RED}FATAL: Invalid signature on SHA256SUMS. Aborting.${C_RESET}" >&2
+        rm -f "$temp_binary" "$temp_checksums" "$temp_signature"
         return 1
     fi
+    echo -e "${C_GREEN}✅ Checksum file signature is valid.${C_RESET}"
+
+    # Verify the binary checksum (exact match by filename)
+    echo "Verifying restic binary checksum..."
+    local expected_hash
+    expected_hash=$(awk -v f="$filename" '$2==f {print $1}' "$temp_checksums")
+    local actual_hash
+    actual_hash=$(sha256sum "$temp_binary" | awk '{print $1}')
+    if [[ -z "$expected_hash" || "$expected_hash" != "$actual_hash" ]]; then
+        echo -e "${C_RED}FATAL: Binary checksum mismatch. Aborting.${C_RESET}" >&2
+        rm -f "$temp_binary" "$temp_checksums" "$temp_signature"
+        return 1
+    fi
+    echo -e "${C_GREEN}✅ Restic binary checksum is valid.${C_RESET}"
+    rm -f "$temp_checksums" "$temp_signature"
+
+    # Decompress and install
     echo "Decompressing and installing to /usr/local/bin/restic..."
-    if bunzip2 -c "$temp_file" > /usr/local/bin/restic.tmp; then
+    if bunzip2 -c "$temp_binary" > /usr/local/bin/restic.tmp; then
         chmod +x /usr/local/bin/restic.tmp
         mv /usr/local/bin/restic.tmp /usr/local/bin/restic
         echo -e "${C_GREEN}✅ Restic version $latest_version installed successfully.${C_RESET}"
     else
-        echo -e "${C_RED}Installation failed. Please try installing manually.${C_RESET}" >&2
+        echo -e "${C_RED}Installation failed.${C_RESET}" >&2
     fi
-    rm -f "$temp_file"
+    rm -f "$temp_binary"
 }
 
 log_message() {
