@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#         Restic Backup Script v0.15 - 2025.09.05
+#         Restic Backup Script v0.16 - 2025.09.06
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.15"
+SCRIPT_VERSION="0.16"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -250,6 +250,27 @@ done
 # =================================================================
 # UTILITY FUNCTIONS
 # =================================================================
+
+display_help() {
+    echo -e "${C_BOLD}Restic Backup Script (v${SCRIPT_VERSION})${C_RESET}"
+    echo "A comprehensive script for managing encrypted, deduplicated backups with restic."
+    echo
+    echo -e "${C_BOLD}USAGE:${C_RESET}"
+    echo "  sudo $0 [COMMAND]"
+    echo
+    echo -e "${C_BOLD}COMMANDS:${C_RESET}"
+    printf "  %-20s %s\n" "[no command]" "Run a standard backup and apply the retention policy."
+    printf "  %-20s %s\n" "--init" "Initialize a new restic repository (one-time setup)."
+    printf "  %-20s %s\n" "--diff" "Show a summary of changes between the last two snapshots."
+    printf "  %-20s %s\n" "--check" "Verify repository integrity by checking a subset of data."
+    printf "  %-20s %s\n" "--forget" "Manually apply the retention policy and prune old data."
+    printf "  %-20s %s\n" "--restore" "Start the interactive restore wizard."
+    printf "  %-20s %s\n" "--dry-run" "Preview backup changes without creating a new snapshot."
+    printf "  %-20s %s\n" "--test" "Validate configuration, permissions, and SSH connectivity."
+    printf "  %-20s %s\n" "--help, -h" "Display this help message."
+    echo
+    echo "You can use --verbose before any command for detailed live output (e.g., 'sudo $0 --verbose --diff')."
+}
 
 log_message() {
     local message="$1"
@@ -816,13 +837,24 @@ case "${1:-}" in
         run_preflight_checks "diff"
         run_diff
         ;;
+    --help | -h)
+        display_help
+        ;;
     *)
+        # Default action or invalid command/flag
+        if [ -n "${1:-}" ]; then
+            echo -e "${C_RED}Error: Unknown command '$1'${C_RESET}\n" >&2
+            display_help
+            exit 1
+        fi
+        
         # Default: full backup
         run_preflight_checks
 
         log_message "=== Starting backup run ==="
 
         if run_backup; then
+            # Only run forget/check if backup was successful
             run_forget
 
             if [ "${CHECK_AFTER_BACKUP:-false}" = "true" ]; then
