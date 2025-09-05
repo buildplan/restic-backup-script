@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#         Restic Backup Script v0.11 - 2025.09.05
+#         Restic Backup Script v0.12 - 2025.09.05
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.11"
+SCRIPT_VERSION="0.12"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -222,7 +222,7 @@ log_message() {
     fi
 }
 
-run_summary() {
+run_diff() {
     echo -e "${C_BOLD}--- Generating Backup Summary ---${C_RESET}"
     log_message "Generating backup summary (diff)"
     local latest_snapshots
@@ -731,9 +731,9 @@ case "${1:-}" in
         run_preflight_checks
         run_forget
         ;;
-    --summary)
-        run_preflight_checks "summary"
-        run_summary
+    --diff)
+        run_preflight_checks "diff"
+        run_diff
         ;;
     *)
         # Default: full backup
