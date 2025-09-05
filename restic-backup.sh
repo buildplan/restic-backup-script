@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =================================================================
-#         Restic Backup Script v0.08 - 2025.09.05
+#         Restic Backup Script v0.09 - 2025.09.05
 # =================================================================
 
 set -euo pipefail
@@ -94,6 +94,9 @@ check_for_script_update() {
     fi
     chmod +x "$temp_file"
     mv "$temp_file" "$0"
+    if [ -n "${SUDO_USER:-}" ]; then
+        chown "${SUDO_USER}:${SUDO_GID:-$SUDO_USER}" "$0"
+    fi
     echo -e "${C_GREEN}✅ Script updated successfully to version $remote_version. Please run the command again.${C_RESET}"
     exit 0
 }
