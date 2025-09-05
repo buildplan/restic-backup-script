@@ -1,16 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#         Restic Backup Script v0.06 - 2025.09.04
+#         Restic Backup Script v0.07 - 2025.09.05
 # =================================================================
-# Based on rsync backup script but using restic for encrypted backups
-# Provides similar functionality with client-side encryption
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.05"
+SCRIPT_VERSION="0.07"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -41,6 +39,48 @@ if [[ $EUID -ne 0 ]]; then
     echo -e "${C_YELLOW}Re-running with sudo...${C_RESET}"
     exec sudo "$0" "$@"
 fi
+
+# =================================================================
+# SELF-UPDATE FUNCTION
+# =================================================================
+
+check_for_script_update() {
+    if ! [ -t 0 ]; then
+        return 0
+    fi
+    local SCRIPT_URL="https://raw.githubusercontent.com/buildplan/restic-backup-script/main/restic-backup.sh"
+    echo -e "${C_BOLD}--- Checking for script updates ---${C_RESET}"
+    local remote_version
+    remote_version=$(curl -sL "$SCRIPT_URL" | grep 'SCRIPT_VERSION=' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
+
+    if [ -z "$remote_version" ] || [[ "$remote_version" == "$SCRIPT_VERSION" ]]; then
+        echo -e "${C_GREEN}✅ Script is up to date (version $SCRIPT_VERSION).${C_RESET}"
+        return 0
+    fi
+    echo -e "${C_YELLOW}A new version of this script is available ($remote_version). You are running $SCRIPT_VERSION.${C_RESET}"
+    read -p "Would you like to download and update now? (y/n): " confirm
+
+    if [[ "${confirm,,}" != "y" && "${confirm,,}" != "yes" ]]; then
+        echo "Skipping update."
+        return 0
+    fi
+    local temp_file
+    temp_file=$(mktemp)
+    if ! curl -sL -o "$temp_file" "$SCRIPT_URL"; then
+        echo -e "${C_RED}Download failed. Please try updating manually.${C_RESET}" >&2
+        rm -f "$temp_file"
+        return 1
+    fi
+    if ! grep -q "#!/bin/bash" "$temp_file"; then
+         echo -e "${C_RED}Downloaded file does not appear to be a valid script. Aborting update.${C_RESET}" >&2
+         rm -f "$temp_file"
+         return 1
+    fi
+    chmod +x "$temp_file"
+    mv "$temp_file" "$0"
+    echo -e "${C_GREEN}✅ Script updated successfully to version $remote_version. Please run the command again.${C_RESET}"
+    exit 0
+}
 
 # =================================================================
 # CONFIGURATION LOADING
@@ -582,6 +622,9 @@ run_restore() {
 # =================================================================
 # MAIN SCRIPT EXECUTION
 # =================================================================
+
+# Check for script updates (interactive mode only)
+check_for_script_update
 
 # Check for Restic and update if necessary
 check_and_install_restic
