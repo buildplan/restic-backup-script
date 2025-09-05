@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#         Restic Backup Script v0.12 - 2025.09.05
+#         Restic Backup Script v0.13 - 2025.09.05
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.12"
+SCRIPT_VERSION="0.13"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -225,31 +225,73 @@ log_message() {
 run_diff() {
     echo -e "${C_BOLD}--- Generating Backup Summary ---${C_RESET}"
     log_message "Generating backup summary (diff)"
-    local latest_snapshots
-    latest_snapshots=($(restic snapshots --host "$HOSTNAME" --latest 2 --json | grep '"short_id"' | sed -E 's/.*"([^"]+)".*/\1/'))
-    if [ "${#latest_snapshots[@]}" -lt 2 ]; then
-        echo -e "${C_YELLOW}Not enough snapshots to create a summary. At least two are required.${C_RESET}"
-        log_message "Summary skipped: less than 2 snapshots available."
+    if ! command -v jq >/dev/null 2>&1; then
+        echo -e "${C_YELLOW}jq not found; install jq for JSON parsing (apt/dnf install jq).${C_RESET}" >&2
+        log_message "WARNING: jq not installed; cannot run JSON-based diff summary."
+        return 1
+    fi
+    local path_args=()
+    for p in $BACKUP_SOURCES; do
+        path_args+=(--path "$p")
+    done
+    local snapshot_json
+    if ! snapshot_json=$(restic snapshots --json --host "$HOSTNAME" "${path_args[@]}"); then
+        echo -e "${C_RED}Error: Failed to list snapshots (host/paths).${C_RESET}" >&2
+        log_message "ERROR: restic snapshots --json failed in run_diff."
+        return 1
+    fi
+    local -a ids=()
+    mapfile -t ids < <(echo "$snapshot_json" | jq -r 'sort_by(.time) | reverse | .[0:2] | .[].id')
+
+    if (( ${#ids[@]} < 2 )); then
+        echo -e "${C_YELLOW}Not enough snapshots for host/paths to generate a summary (need ≥2).${C_RESET}"
+        log_message "Summary skipped: fewer than 2 snapshots for host/paths."
         return 0
     fi
-    local snap_new="${latest_snapshots[0]}"
-    local snap_old="${latest_snapshots[1]}"
+    local snap_new="${ids[0]}"
+    local snap_old="${ids[1]}"
     echo -e "${C_DIM}Comparing snapshot ${snap_old} (older) with ${snap_new} (newer)...${C_RESET}"
-    local diff_summary
-    diff_summary=$(restic diff "${snap_old}" "${snap_new}")
-    if [ -z "$diff_summary" ]; then
-        diff_summary="No changes detected between the last two backups."
+    local stats_json
+    if ! stats_json=$(restic diff --json "$snap_old" "$snap_new" | jq -nR '
+        reduce inputs as $line ({}; try ($line | fromjson) catch empty)
+        | select(.message_type=="statistics")
+    '); then
+        echo -e "${C_RED}Error: Failed to generate diff statistics.${C_RESET}" >&2
+        log_message "ERROR: restic diff --json failed between $snap_old and $snap_new."
+        return 1
     fi
+    if [ -z "$stats_json" ]; then
+        local human
+        human=$(restic diff "$snap_old" "$snap_new" || true)
+        if [ -z "$human" ]; then
+            echo -e "${C_GREEN}No changes detected between the last two snapshots.${C_RESET}"
+            log_message "Diff found no changes."
+            return 0
+        fi
+        echo -e "\n${C_BOLD}--- Diff Summary (fallback) ---${C_RESET}"
+        echo "$human"
+        echo -e "${C_BOLD}-------------------------------${C_RESET}"
+        send_notification "Backup Summary: $HOSTNAME" "page_facing_up" \
+            "${NTFY_PRIORITY_SUCCESS}" "success" "$human"
+        log_message "Backup diff summary (fallback) sent."
+        echo -e "${C_GREEN}✅ Backup summary sent.${C_RESET}"
+        return 0
+    fi
+    local summary
+    summary=$(echo "$stats_json" | jq -r '
+      "Changed files: \(.changed_files)\n" +
+      "Added: files \(.added.files), dirs \(.added.dirs), others \(.added.others), bytes \(.added.bytes)\n" +
+      "Removed: files \(.removed.files), dirs \(.removed.dirs), others \(.removed.others), bytes \(.removed.bytes)"
+    ')
     echo -e "\n${C_BOLD}--- Diff Summary ---${C_RESET}"
-    echo "$diff_summary"
+    echo "$summary"
     echo -e "${C_BOLD}--------------------${C_RESET}"
     local notification_title="Backup Summary: $HOSTNAME"
     local notification_message
-    printf -v notification_message "Comparison between snapshots %s (older) and %s (newer):\n\n\`\`\`\n%s\n\`\`\`" \
-        "$snap_old" "$snap_new" "$diff_summary"
+    printf -v notification_message "Diff %s (older) → %s (newer):\n%s" "$snap_old" "$snap_new" "$summary"
     send_notification "$notification_title" "page_facing_up" \
         "${NTFY_PRIORITY_SUCCESS}" "success" "$notification_message"
-    log_message "Backup summary sent successfully."
+    log_message "Backup diff summary sent."
     echo -e "${C_GREEN}✅ Backup summary sent.${C_RESET}"
 }
 
