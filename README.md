@@ -245,6 +245,5 @@ To run the backup automatically, edit the root crontab.
     0 4 * * 0 /root/scripts/backup/restic-backup.sh --forget > /dev/null 2>&1
 
     ```
-    *For pune job in your `restic-backup.conf`, you could set `PRUNE_AFTER_FORGET=true`.
-
+    *For pune job in your `restic-backup.conf`, you could set `PRUNE_AFTER_FORGET=true`.*
     *Redirecting output to `/dev/null` is recommended, as the script handles its own logging and notifications.*
