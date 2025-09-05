@@ -240,6 +240,11 @@ To run the backup automatically, edit the root crontab.
 
     # Run the Restic backup every day at 3:00 AM
     0 3 * * * /root/scripts/backup/restic-backup.sh > /dev/null 2>&1
-    ```
+ 
+    # Weekly prune cron job for to run every Sunday at 4 AM
+    0 4 * * 0 /root/scripts/backup/restic-backup.sh --forget > /dev/null 2>&1
 
-    *(Redirecting output to `/dev/null` is recommended, as the script handles its own logging and notifications).*
+    ```
+    *For pune job in your `restic-backup.conf`, you could set `PRUNE_AFTER_FORGET=true`.
+
+    *Redirecting output to `/dev/null` is recommended, as the script handles its own logging and notifications.*
