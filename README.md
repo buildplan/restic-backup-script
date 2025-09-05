@@ -150,6 +150,8 @@ The most reliable way for the script to connect to a remote server is via an SSH
         User u123456-sub4
         Port 23
         IdentityFile /root/.ssh/id_ed25519
+        ServerAliveInterval 60
+        ServerAliveCountMax 240
     ```
 
 5.  **Set secure permissions** and test the connection:
