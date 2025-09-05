@@ -1,4 +1,4 @@
-## Quick Guide: Fixing a Stale Restic Lock
+## Fixing a Stale Restic Lock
 
 You'll know you have this issue if a backup fails with an error message like `unable to create lock in backend: repository is already locked`.
 
