@@ -233,6 +233,9 @@ To run the backup automatically, edit the root crontab.
 2.  Add a line to schedule the script. This example runs the backup every day at 3:00 AM.
 
     ```crontab
+    # Define a safe PATH that includes the location of restic
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
     # Run the Restic backup every day at 3:00 AM
     0 3 * * * /root/scripts/backup/restic-backup.sh > /dev/null 2>&1
     ```
