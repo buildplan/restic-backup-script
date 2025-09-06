@@ -1,5 +1,7 @@
 # Automated Encrypted Backups with Restic
 
+[![Shell Script Linting](https://github.com/buildplan/restic-backup-script/actions/workflows/lint.yml/badge.svg)](https://github.com/buildplan/restic-backup-script/actions/workflows/lint.yml)
+
 This script automates encrypted, deduplicated backups of local directories to a remote SFTP server (such as a Hetzner Storage Box) using `restic`.
 
 -----
