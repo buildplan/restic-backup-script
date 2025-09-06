@@ -1,0 +1,32 @@
+name: Shell Script Linting
+on:
+  push:
+    branches:
+      - main
+      - 'improve**'
+    paths:
+      - 'restic-backup.sh'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'restic-backup.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          severity: error
+          scandir: './restic-backup.sh'
+        env:
+          SHELLCHECK_OPTS: -s bash
