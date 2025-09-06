@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#         Restic Backup Script v0.16 - 2025.09.06
+#         Restic Backup Script v0.17 - 2025.09.06
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.16"
+SCRIPT_VERSION="0.17"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -252,24 +252,24 @@ done
 # =================================================================
 
 display_help() {
-    echo -e "${C_BOLD}Restic Backup Script (v${SCRIPT_VERSION})${C_RESET}"
+    echo -e "${C_BOLD}${C_CYAN}Restic Backup Script (v${SCRIPT_VERSION})${C_RESET}"
     echo "A comprehensive script for managing encrypted, deduplicated backups with restic."
     echo
-    echo -e "${C_BOLD}USAGE:${C_RESET}"
-    echo "  sudo $0 [COMMAND]"
+    echo -e "${C_BOLD}${C_YELLOW}USAGE:${C_RESET}"
+    echo -e "  sudo $0 ${C_GREEN}[COMMAND]${C_RESET}"
     echo
-    echo -e "${C_BOLD}COMMANDS:${C_RESET}"
-    printf "  %-20s %s\n" "[no command]" "Run a standard backup and apply the retention policy."
-    printf "  %-20s %s\n" "--init" "Initialize a new restic repository (one-time setup)."
-    printf "  %-20s %s\n" "--diff" "Show a summary of changes between the last two snapshots."
-    printf "  %-20s %s\n" "--check" "Verify repository integrity by checking a subset of data."
-    printf "  %-20s %s\n" "--forget" "Manually apply the retention policy and prune old data."
-    printf "  %-20s %s\n" "--restore" "Start the interactive restore wizard."
-    printf "  %-20s %s\n" "--dry-run" "Preview backup changes without creating a new snapshot."
-    printf "  %-20s %s\n" "--test" "Validate configuration, permissions, and SSH connectivity."
-    printf "  %-20s %s\n" "--help, -h" "Display this help message."
+    echo -e "${C_BOLD}${C_YELLOW}COMMANDS:${C_RESET}"
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "[no command]" "Run a standard backup and apply the retention policy."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--init" "Initialize a new restic repository (one-time setup)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--diff" "Show a summary of changes between the last two snapshots."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check" "Verify repository integrity by checking a subset of data."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Manually apply the retention policy and prune old data."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--restore" "Start the interactive restore wizard."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dry-run" "Preview backup changes without creating a new snapshot."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--test" "Validate configuration, permissions, and SSH connectivity."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--help, -h" "Display this help message."
     echo
-    echo "You can use --verbose before any command for detailed live output (e.g., 'sudo $0 --verbose --diff')."
+    echo -e "You can use ${C_GREEN}--verbose${C_RESET} before any command for detailed live output (e.g., 'sudo $0 --verbose --diff')."
 }
 
 log_message() {
