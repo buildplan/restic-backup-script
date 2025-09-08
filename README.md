@@ -95,7 +95,7 @@ sudo dnf install -y restic jq gnupg curl bzip2 util-linux coreutils less
 
 You could also download and install the latest version of `restic`. 
 
-**Note:** While `restic` can be installed from your system's package manager, it is often an older version. It is **recommended** to install it manually or allow the script's built-in auto-updater to fetch the latest official version for you.
+**Note:** While `restic` can be installed from your system's package manager, it is often an older version. It is **recommended** to install it manually or allow the script's built-in auto-updater to fetch the latest [official version](https://github.com/restic/restic/releases) for you.
 
 ```sh
 # Find your architecture (e.g., x86_64 or aarch64)
