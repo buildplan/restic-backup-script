@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#         Restic Backup Script v0.17 - 2025.09.06
+#         Restic Backup Script v0.18 - 2025.09.08
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.17"
+SCRIPT_VERSION="0.18"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -262,6 +262,7 @@ display_help() {
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "[no command]" "Run a standard backup and apply the retention policy."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--init" "Initialize a new restic repository (one-time setup)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--diff" "Show a summary of changes between the last two snapshots."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots" "List all available snapshots in the repository."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check" "Verify repository integrity by checking a subset of data."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Manually apply the retention policy and prune old data."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--restore" "Start the interactive restore wizard."
@@ -269,7 +270,8 @@ display_help() {
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--test" "Validate configuration, permissions, and SSH connectivity."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--help, -h" "Display this help message."
     echo
-    echo -e "You can use ${C_GREEN}--verbose${C_RESET} before any command for detailed live output (e.g., 'sudo $0 --verbose --diff')."
+    echo -e "Use ${C_GREEN}--verbose${C_RESET} before any command for detailed live output (e.g., 'sudo $0 --verbose --diff')."
+    echo
 }
 
 log_message() {
@@ -353,6 +355,17 @@ run_diff() {
         "${NTFY_PRIORITY_SUCCESS}" "success" "$notification_message"
     log_message "Backup diff summary sent."
     echo -e "${C_GREEN}✅ Backup summary sent.${C_RESET}"
+}
+
+run_snapshots() {
+    echo -e "${C_BOLD}--- Listing Snapshots ---${C_RESET}"
+    log_message "Listing all snapshots"
+
+    if ! restic snapshots; then
+        log_message "ERROR: Failed to list snapshots"
+        echo -e "${C_RED}❌ Failed to list snapshots. Check repository connection and credentials.${C_RESET}" >&2
+        return 1
+    fi
 }
 
 send_ntfy() {
@@ -821,6 +834,10 @@ case "${1:-}" in
         run_preflight_checks
         echo -e "${C_GREEN}✅ All tests passed${C_RESET}"
         ;;
+    --snapshots)
+        run_preflight_checks
+        run_snapshots
+        ;;
     --restore)
         run_preflight_checks "restore"
         run_restore
@@ -841,13 +858,12 @@ case "${1:-}" in
         display_help
         ;;
     *)
-        # Default action or invalid command/flag
         if [ -n "${1:-}" ]; then
             echo -e "${C_RED}Error: Unknown command '$1'${C_RESET}\n" >&2
             display_help
             exit 1
         fi
-        
+
         # Default: full backup
         run_preflight_checks
 
