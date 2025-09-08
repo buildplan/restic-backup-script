@@ -33,6 +33,7 @@ This script automates encrypted, deduplicated backups of local directories to a 
   - `sudo ./restic-backup.sh --restore` - Start the interactive restore wizard.
   - `sudo ./restic-backup.sh --forget` - Manually apply the retention policy and prune old data.
   - `sudo ./restic-backup.sh --diff` - Show a summary of changes between the last two snapshots. 
+  - `sudo ./restic-backup.sh --snapshots` - List all available snapshots in the repository.
   - `sudo ./restic-backup.sh --init` - (One-time setup) Initialize the remote repository.
   - `sudo ./restic-backup.sh --help` - Displays help and all the flags.
 
