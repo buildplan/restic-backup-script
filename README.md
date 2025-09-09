@@ -51,6 +51,8 @@ The script uses specific exit codes for different failures to help with debuggin
   - **Exit Code `11`:** The `RESTIC_PASSWORD_FILE` cannot be found.
   - **Exit Code `12`:** The script cannot connect to or access the Restic repository.
   - **Exit Code `13`:** A source directory in `BACKUP_SOURCES` does not exist or is not readable.
+  - **Exit Code `14`:** The `EXCLUDE_FILE` is not readable.
+  - **Exit Code `15`:** The `LOG_FILE` is not writable.
   - **Exit Code `20`:** The `restic init` command failed.
 
 -----
