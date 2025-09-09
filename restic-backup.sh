@@ -1,14 +1,14 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.23 - 2025.09.09
+#         Restic Backup Script v0.24 - 2025.09.10
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.23"
+SCRIPT_VERSION="0.24"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -46,20 +46,30 @@ fi
 
 import_restic_key() {
     local fpr="CF8F18F2844575973F79D4E191A6868BD3F7A907"
-    # Return successfully if key already exists
-    gpg --list-keys "$fpr" >/dev/null 2>&1 && return 0
-    local servers=(
-        "hkps://keyserver.ubuntu.com"
-        "hkps://keys.openpgp.org"
-        "hkps://pgpkeys.eu"
-    )
-    for ks in "${servers[@]}"; do
-        echo "Fetching restic release key from $ks ..."
-        if gpg --keyserver "$ks" --recv-keys "$fpr"; then
+    # Check local user keyring
+    if gpg --list-keys "$fpr" >/dev/null 2>&1; then
+        return 0
+    fi
+    # Check Debian/Ubuntu system keyring
+    local debian_keyring="/usr/share/keyrings/restic-archive-keyring.gpg"
+    if [[ -f "$debian_keyring" ]]; then
+        echo "Found debian keyring, checking for key..."
+        if gpg --no-default-keyring --keyring "$debian_keyring" --list-keys "$fpr" >/dev/null 2>&1; then
+            echo "Importing trusted key from system keyring..."
+            gpg --no-default-keyring --keyring "$debian_keyring" --export "$fpr" | gpg --import >/dev/null 2>&1
+            return $?
+        fi
+    fi
+    # Try public keyservers fallback
+    local servers=( "hkps://hkps.pool.sks-keyservers.net" "hkps://keys.openpgp.org" "hkps://keyserver.ubuntu.com" )
+    for server in "${servers[@]}"; do
+        echo "Attempting to fetch from $server..."
+        if gpg --keyserver "$server" --recv-keys "$fpr"; then
+            echo "Key imported successfully."
             return 0
         fi
     done
-    echo -e "${C_RED}Failed to import restic PGP key from all keyservers.${C_RESET}" >&2
+    echo "Failed to import restic PGP key." >&2
     return 1
 }
 
@@ -475,86 +485,100 @@ cleanup() {
 
 run_preflight_checks() {
     local mode="${1:-backup}"
-    echo -e "${C_BOLD}--- Running Pre-flight Checks ---${C_RESET}"
+    local verbosity="${2:-quiet}"
+
+    if [[ "$verbosity" == "verbose" ]]; then
+        echo -e "${C_BOLD}--- Running Pre-flight Checks ---${C_RESET}"
+    fi
 
     # System Dependencies
-    echo -e "\n  ${C_DIM}- Checking System Dependencies${C_RESET}"
-    printf "    %-65s" "Required commands (restic, curl, flock)..."
+    if [[ "$verbosity" == "verbose" ]]; then
+        echo -e "\n  ${C_DIM}- Checking System Dependencies${C_RESET}"
+        printf "    %-65s" "Required commands (restic, curl, flock)..."
+    fi
     local required_cmds=(restic curl flock)
     for cmd in "${required_cmds[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then
-            echo -e "[${C_RED} FAIL ${C_RESET}]"
+            [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
             echo -e "${C_RED}ERROR: Required command '$cmd' not found${C_RESET}" >&2
             exit 10
         fi
     done
-    echo -e "[${C_GREEN}  OK  ${C_RESET}]"
+    if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
 
     # Configuration Files
-    echo -e "\n  ${C_DIM}- Checking Configuration Files${C_RESET}"
-    printf "    %-65s" "Password file ('$RESTIC_PASSWORD_FILE')..."
+    if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Configuration Files${C_RESET}"; fi
+
+    if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Password file ('$RESTIC_PASSWORD_FILE')..."; fi
     if [ ! -r "$RESTIC_PASSWORD_FILE" ]; then
-        echo -e "[${C_RED} FAIL ${C_RESET}]"
+        [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
         echo -e "${C_RED}ERROR: Password file not found or not readable: $RESTIC_PASSWORD_FILE${C_RESET}" >&2
         exit 11
     fi
-    echo -e "[${C_GREEN}  OK  ${C_RESET}]"
+    if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
 
     if [ -n "${EXCLUDE_FILE:-}" ]; then
-        printf "    %-65s" "Exclude file ('$EXCLUDE_FILE')..."
+        if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Exclude file ('$EXCLUDE_FILE')..."; fi
         if [ ! -r "$EXCLUDE_FILE" ]; then
-            echo -e "[${C_RED} FAIL ${C_RESET}]"
+            [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
             echo -e "${C_RED}ERROR: The specified EXCLUDE_FILE is not readable: ${EXCLUDE_FILE}${C_RESET}" >&2
             exit 14
         fi
-        echo -e "[${C_GREEN}  OK  ${C_RESET}]"
+        if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     fi
 
-    printf "    %-65s" "Log file writability ('$LOG_FILE')..."
+    if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Log file writability ('$LOG_FILE')..."; fi
     if ! touch "$LOG_FILE" >/dev/null 2>&1; then
-        echo -e "[${C_RED} FAIL ${C_RESET}]"
+        [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
         echo -e "${C_RED}ERROR: The log file or its directory is not writable: ${LOG_FILE}${C_RESET}" >&2
         exit 15
     fi
-    echo -e "[${C_GREEN}  OK  ${C_RESET}]"
+    if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
 
     # Repository State
-    echo -e "\n  ${C_DIM}- Checking Repository State${C_RESET}"
-    printf "    %-65s" "Repository connectivity and credentials..."
+    if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Repository State${C_RESET}"; fi
+
+    if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Repository connectivity and credentials..."; fi
     if ! restic cat config >/dev/null 2>&1; then
         if [[ "$mode" == "init" ]]; then
-            echo -e "[${C_YELLOW} SKIP ${C_RESET}] (OK for --init mode)"
+            if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_YELLOW} SKIP ${C_RESET}] (OK for --init mode)"; fi
             return 0
         fi
-        echo -e "[${C_RED} FAIL ${C_RESET}]"
+        [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
         echo -e "${C_RED}ERROR: Cannot access repository. Check credentials or run --init first.${C_RESET}" >&2
         exit 12
     fi
-    echo -e "[${C_GREEN}  OK  ${C_RESET}]"
+    if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
 
-    printf "    %-65s" "Stale repository locks..."
+    if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Stale repository locks..."; fi
     local lock_info
     lock_info=$(restic list locks 2>/dev/null || true)
     if [ -n "$lock_info" ]; then
-        echo -e "[${C_YELLOW} WARN ${C_RESET}]"
-        echo -e "${C_YELLOW}    ⚠️  Stale locks found! This may prevent backups from running.${C_RESET}"
-        echo -e "${C_DIM}    Run the --unlock command to remove them.${C_RESET}"
+        if [[ "$verbosity" == "verbose" ]]; then
+            echo -e "[${C_YELLOW} WARN ${C_RESET}]"
+            echo -e "${C_YELLOW}    ⚠️  Stale locks found! This may prevent backups from running.${C_RESET}"
+            echo -e "${C_DIM}    Run the --unlock command to remove them.${C_RESET}"
+        fi
     else
-        echo -e "[${C_GREEN}  OK  ${C_RESET}]"
+        if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     fi
 
     # Backup Sources
     if [[ "$mode" == "backup" || "$mode" == "diff" ]]; then
-        echo -e "\n  ${C_DIM}- Checking Backup Sources${C_RESET}"
+        if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Backup Sources${C_RESET}"; fi
         for source in $BACKUP_SOURCES; do
-            printf "    %-65s" "Source directory ('$source')..."
+            if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Source directory ('$source')..."; fi
             if [ ! -d "$source" ] || [ ! -r "$source" ]; then
-                echo -e "[${C_RED} FAIL ${C_RESET}]"
+                [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
                 echo -e "${C_RED}ERROR: Source directory not found or not readable: $source${C_RESET}" >&2
                 exit 13
             fi
-            echo -e "[${C_GREEN}  OK  ${C_RESET}]"
+            if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
         done
+    fi
+
+    if [[ "$verbosity" == "quiet" ]]; then
+        echo -e "${C_GREEN}✅ Pre-flight checks passed.${C_RESET}"
     fi
 }
 
@@ -888,12 +912,12 @@ rotate_log
 # Handle different modes
 case "${1:-}" in
     --init)
-        run_preflight_checks "init"
+        run_preflight_checks "init" "quiet"
         init_repository
         ;;
     --dry-run)
         echo -e "${C_BOLD}--- Dry Run Mode ---${C_RESET}"
-        run_preflight_checks
+        run_preflight_checks "backup" "quiet"
         backup_cmd=(restic)
         [ "${LOG_LEVEL:-1}" -le 0 ] && backup_cmd+=(--quiet)
         [ "${LOG_LEVEL:-1}" -ge 2 ] && backup_cmd+=(--verbose)
@@ -911,31 +935,31 @@ case "${1:-}" in
         ;;
     --test)
         echo -e "${C_BOLD}--- Test Mode ---${C_RESET}"
-        run_preflight_checks
+        run_preflight_checks "backup" "verbose"
         echo -e "${C_GREEN}✅ All tests passed${C_RESET}"
         ;;
     --snapshots)
-        run_preflight_checks
+        run_preflight_checks "backup" "quiet"
         run_snapshots
         ;;
     --restore)
-        run_preflight_checks "restore"
+        run_preflight_checks "restore" "quiet"
         run_restore
         ;;
     --check)
-        run_preflight_checks
+        run_preflight_checks "backup" "quiet"
         run_check
         ;;
     --forget)
-        run_preflight_checks
+        run_preflight_checks "backup" "quiet"
         run_forget
         ;;
     --diff)
-        run_preflight_checks "diff"
+        run_preflight_checks "diff" "quiet"
         run_diff
         ;;
     --unlock)
-        run_preflight_checks "unlock"
+        run_preflight_checks "unlock" "quiet"
         run_unlock
         ;;
     --help | -h)
@@ -949,7 +973,7 @@ case "${1:-}" in
         fi
 
         # Default: full backup
-        run_preflight_checks
+        run_preflight_checks "backup" "quiet"
 
         log_message "=== Starting backup run ==="
 
