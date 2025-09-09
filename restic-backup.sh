@@ -576,6 +576,10 @@ run_preflight_checks() {
             if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
         done
     fi
+
+    if [[ "$verbosity" == "quiet" ]]; then
+        echo -e "${C_GREEN}✅ Pre-flight checks passed.${C_RESET}"
+    fi
 }
 
 rotate_log() {
