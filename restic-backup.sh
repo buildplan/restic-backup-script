@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#         Restic Backup Script v0.19 - 2025.09.09
+#         Restic Backup Script v0.20 - 2025.09.09
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.19"
+SCRIPT_VERSION="0.20"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -66,30 +66,25 @@ import_restic_key() {
 check_and_install_restic() {
     echo -e "${C_BOLD}--- Checking Restic Version ---${C_RESET}"
 
-    # Check for dependencies
     if ! command -v bzip2 &>/dev/null || ! command -v curl &>/dev/null || ! command -v gpg &>/dev/null; then
         echo -e "${C_RED}ERROR: 'bzip2', 'curl', and 'gpg' are required for secure auto-installation.${C_RESET}" >&2
-        echo -e "${C_YELLOW}Please install them with: sudo apt-get install bzip2 curl gnupg${C_RESET}" >&2
+        echo -e "${C_YELLOW}On Debian based systems install with: sudo apt-get install bzip2 curl gnupg${C_RESET}" >&2
         exit 1
     fi
-
     local latest_version
     latest_version=$(curl -s "https://api.github.com/repos/restic/restic/releases/latest" | grep -o '"tag_name": "[^"]*"' | sed -E 's/.*"v?([^"]+)".*/\1/')
     if [ -z "$latest_version" ]; then
         echo -e "${C_YELLOW}Could not fetch latest restic version from GitHub. Skipping check.${C_RESET}"
         return 0
     fi
-
     local local_version=""
     if command -v restic &>/dev/null; then
         local_version=$(restic version | head -n1 | awk '{print $2}')
     fi
-
     if [[ "$local_version" == "$latest_version" ]]; then
         echo -e "${C_GREEN}✅ Restic is up to date (version $local_version).${C_RESET}"
         return 0
     fi
-
     echo -e "${C_YELLOW}A new version of Restic is available ($latest_version). Current version is ${local_version:-not installed}.${C_RESET}"
     if [ -t 1 ]; then
         read -p "Would you like to download and install it? (y/n): " confirm
@@ -102,12 +97,12 @@ check_and_install_restic() {
         echo "Skipping interactive installation in non-interactive mode (cron)."
         return 0
     fi
-
     if ! import_restic_key; then
         return 1
     fi
-
-    # Determine architecture and URLs
+    local temp_binary temp_checksums temp_signature
+    temp_binary=$(mktemp) && temp_checksums=$(mktemp) && temp_signature=$(mktemp)
+    trap 'rm -f "$temp_binary" "$temp_checksums" "$temp_signature"' RETURN
     local arch=$(uname -m)
     local arch_suffix=""
     case "$arch" in
@@ -118,40 +113,27 @@ check_and_install_restic() {
     local latest_version_tag="v${latest_version}"
     local filename="restic_${latest_version}_linux_${arch_suffix}.bz2"
     local base_url="https://github.com/restic/restic/releases/download/${latest_version_tag}"
-
-    # Download artifacts
+    local curl_opts=(-sL --fail --retry 3 --retry-delay 2)
     echo "Downloading Restic binary, checksums, and signature..."
-    local temp_binary temp_checksums temp_signature
-    temp_binary=$(mktemp) && temp_checksums=$(mktemp) && temp_signature=$(mktemp)
-    curl -sL -o "$temp_binary"   "${base_url}/${filename}"       || { echo "Download failed"; rm -f "$temp_binary" "$temp_checksums" "$temp_signature"; return 1; }
-    curl -sL -o "$temp_checksums" "${base_url}/SHA256SUMS"      || { echo "Download failed"; rm -f "$temp_binary" "$temp_checksums" "$temp_signature"; return 1; }
-    curl -sL -o "$temp_signature" "${base_url}/SHA256SUMS.asc"  || { echo "Download failed"; rm -f "$temp_binary" "$temp_checksums" "$temp_signature"; return 1; }
-
-    # Verify signature of checksums
+    if ! curl "${curl_opts[@]}" -o "$temp_binary"   "${base_url}/${filename}"; then echo "Download failed"; return 1; fi
+    if ! curl "${curl_opts[@]}" -o "$temp_checksums" "${base_url}/SHA256SUMS"; then echo "Download failed"; return 1; fi
+    if ! curl "${curl_opts[@]}" -o "$temp_signature" "${base_url}/SHA256SUMS.asc"; then echo "Download failed"; return 1; fi
     echo "Verifying checksum signature..."
     if ! gpg --verify "$temp_signature" "$temp_checksums" >/dev/null 2>&1; then
         echo -e "${C_RED}FATAL: Invalid signature on SHA256SUMS. Aborting.${C_RESET}" >&2
-        rm -f "$temp_binary" "$temp_checksums" "$temp_signature"
         return 1
     fi
     echo -e "${C_GREEN}✅ Checksum file signature is valid.${C_RESET}"
-
-    # Verify the binary checksum (exact match by filename)
     echo "Verifying restic binary checksum..."
     local expected_hash
     expected_hash=$(awk -v f="$filename" '$2==f {print $1}' "$temp_checksums")
     local actual_hash
-    # --- THIS LINE IS THE FIX ---
     actual_hash=$(sha256sum "$temp_binary" | awk '{print $1}')
     if [[ -z "$expected_hash" || "$expected_hash" != "$actual_hash" ]]; then
         echo -e "${C_RED}FATAL: Binary checksum mismatch. Aborting.${C_RESET}" >&2
-        rm -f "$temp_binary" "$temp_checksums" "$temp_signature"
         return 1
     fi
     echo -e "${C_GREEN}✅ Restic binary checksum is valid.${C_RESET}"
-    rm -f "$temp_checksums" "$temp_signature"
-
-    # Decompress and install
     echo "Decompressing and installing to /usr/local/bin/restic..."
     if bunzip2 -c "$temp_binary" > /usr/local/bin/restic.tmp; then
         chmod +x /usr/local/bin/restic.tmp
@@ -160,15 +142,14 @@ check_and_install_restic() {
     else
         echo -e "${C_RED}Installation failed.${C_RESET}" >&2
     fi
-    rm -f "$temp_binary"
 }
 
 check_for_script_update() {
     if ! [ -t 0 ]; then
         return 0
     fi
-    local SCRIPT_URL="https://raw.githubusercontent.com/buildplan/restic-backup-script/main/restic-backup.sh"
     echo -e "${C_BOLD}--- Checking for script updates ---${C_RESET}"
+    local SCRIPT_URL="https://raw.githubusercontent.com/buildplan/restic-backup-script/main/restic-backup.sh"
     local remote_version
     remote_version=$(curl -sL "$SCRIPT_URL" | grep 'SCRIPT_VERSION=' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
     if [ -z "$remote_version" ] || [[ "$remote_version" == "$SCRIPT_VERSION" ]]; then
@@ -181,38 +162,36 @@ check_for_script_update() {
         echo "Skipping update."
         return 0
     fi
-    local temp_file
-    temp_file=$(mktemp)
-    if ! curl -sL -o "$temp_file" "$SCRIPT_URL"; then
-        echo -e "${C_RED}Download failed. Please try updating manually.${C_RESET}" >&2
-        rm -f "$temp_file"
-        return 1
-    fi
-    echo "Verifying downloaded file integrity..."
+    local temp_script temp_checksum
+    temp_script=$(mktemp)
+    temp_checksum=$(mktemp)
+    trap 'rm -f "$temp_script" "$temp_checksum"' RETURN
     local CHECKSUM_URL="${SCRIPT_URL}.sha256"
+    local curl_opts=(-sL --fail --retry 3 --retry-delay 2)
+    echo "Downloading script update..."
+    if ! curl "${curl_opts[@]}" -o "$temp_script"   "$SCRIPT_URL";    then echo "Download failed"; return 1; fi
+    if ! curl "${curl_opts[@]}" -o "$temp_checksum" "$CHECKSUM_URL";  then echo "Download failed"; return 1; fi
+    echo "Verifying downloaded file integrity..."
     local remote_hash
-    remote_hash=$(curl -sL "$CHECKSUM_URL" | awk '{print $1}')
+    remote_hash=$(awk '{print $1}' "$temp_checksum")
     if [ -z "$remote_hash" ]; then
-        echo -e "${C_RED}Could not download checksum file. Aborting update.${C_RESET}" >&2
-        rm -f "$temp_file"
+        echo -e "${C_RED}Could not read remote checksum. Aborting update.${C_RESET}" >&2
         return 1
     fi
     local local_hash
-    local_hash=$(sha256sum "$temp_file" | awk '{print $1}')
+    local_hash=$(sha256sum "$temp_script" | awk '{print $1}')
     if [[ "$local_hash" != "$remote_hash" ]]; then
         echo -e "${C_RED}FATAL: Checksum mismatch! File may be corrupt or tampered with.${C_RESET}" >&2
         echo -e "${C_RED}Aborting update for security reasons.${C_RESET}" >&2
-        rm -f "$temp_file"
         return 1
     fi
     echo -e "${C_GREEN}✅ Checksum verified successfully.${C_RESET}"
-    if ! grep -q "#!/bin/bash" "$temp_file"; then
+    if ! grep -q "#!/bin/bash" "$temp_script"; then
          echo -e "${C_RED}Downloaded file does not appear to be a valid script. Aborting update.${C_RESET}" >&2
-         rm -f "$temp_file"
          return 1
     fi
-    chmod +x "$temp_file"
-    mv "$temp_file" "$0"
+    chmod +x "$temp_script"
+    mv "$temp_script" "$0"
     if [ -n "${SUDO_USER:-}" ] && [[ "$SCRIPT_DIR" != /root* ]]; then
         chown "${SUDO_USER}:${SUDO_GID:-$SUDO_USER}" "$0"
     fi
