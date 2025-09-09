@@ -635,7 +635,7 @@ run_backup() {
     log_message "Starting backup of: $BACKUP_SOURCES"
 
     # Build and execute backup command
-    local backup_cmd=(restic)
+    backup_cmd=(restic)
     [ "${LOG_LEVEL:-1}" -le 0 ] && backup_cmd+=(--quiet)
     [ "${LOG_LEVEL:-1}" -ge 2 ] && backup_cmd+=(--verbose)
     [ "${LOG_LEVEL:-1}" -ge 3 ] && backup_cmd+=(--verbose)
@@ -894,7 +894,7 @@ case "${1:-}" in
     --dry-run)
         echo -e "${C_BOLD}--- Dry Run Mode ---${C_RESET}"
         run_preflight_checks
-        local backup_cmd=(restic)
+        backup_cmd=(restic)
         [ "${LOG_LEVEL:-1}" -le 0 ] && backup_cmd+=(--quiet)
         [ "${LOG_LEVEL:-1}" -ge 2 ] && backup_cmd+=(--verbose)
         [ "${LOG_LEVEL:-1}" -ge 3 ] && backup_cmd+=(--verbose)
