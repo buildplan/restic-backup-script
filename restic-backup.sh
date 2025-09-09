@@ -653,7 +653,6 @@ init_repository() {
 
 run_backup() {
     local start_time=$(date +%s)
-    backup_cmd
 
     echo -e "${C_BOLD}--- Starting Backup ---${C_RESET}"
     log_message "Starting backup of: $BACKUP_SOURCES"
