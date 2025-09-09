@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#         Restic Backup Script v0.22 - 2025.09.09
+#         Restic Backup Script v0.23 - 2025.09.09
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.22"
+SCRIPT_VERSION="0.23"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -582,42 +582,6 @@ rotate_log() {
     fi
 }
 
-build_restic_command() {
-    local operation="$1"
-    local restic_cmd=(restic)
-
-    # Add verbosity
-    case "${LOG_LEVEL:-1}" in
-        0) restic_cmd+=(--quiet) ;;
-        2) restic_cmd+=(--verbose) ;;
-        3) restic_cmd+=(--verbose --verbose) ;;
-    esac
-
-    restic_cmd+=("$operation")
-
-    case "$operation" in
-        backup)
-            [ -n "${BACKUP_TAG:-}" ] && restic_cmd+=(--tag "$BACKUP_TAG")
-            [ -n "${COMPRESSION:-}" ] && restic_cmd+=(--compression "$COMPRESSION")
-            [ -n "${PACK_SIZE:-}" ] && restic_cmd+=(--pack-size "$PACK_SIZE")
-            [ "${ONE_FILE_SYSTEM:-false}" = "true" ] && restic_cmd+=(--one-file-system)
-            [ -n "${EXCLUDE_FILE:-}" ] && [ -f "$EXCLUDE_FILE" ] && restic_cmd+=(--exclude-file "$EXCLUDE_FILE")
-            [ -n "${EXCLUDE_TEMP_FILE:-}" ] && restic_cmd+=(--exclude-file "$EXCLUDE_TEMP_FILE")
-            restic_cmd+=($BACKUP_SOURCES)
-            ;;
-        forget)
-            [ -n "${KEEP_LAST:-}" ] && restic_cmd+=(--keep-last "$KEEP_LAST")
-            [ -n "${KEEP_DAILY:-}" ] && restic_cmd+=(--keep-daily "$KEEP_DAILY")
-            [ -n "${KEEP_WEEKLY:-}" ] && restic_cmd+=(--keep-weekly "$KEEP_WEEKLY")
-            [ -n "${KEEP_MONTHLY:-}" ] && restic_cmd+=(--keep-monthly "$KEEP_MONTHLY")
-            [ -n "${KEEP_YEARLY:-}" ] && restic_cmd+=(--keep-yearly "$KEEP_YEARLY")
-            [ "${PRUNE_AFTER_FORGET:-true}" = "true" ] && restic_cmd+=(--prune)
-            ;;
-    esac
-
-    echo "${restic_cmd[@]}"
-}
-
 run_with_priority() {
     local cmd=("$@")
 
@@ -671,12 +635,23 @@ run_backup() {
     log_message "Starting backup of: $BACKUP_SOURCES"
 
     # Build and execute backup command
-    backup_cmd=$(build_restic_command backup)
+    local backup_cmd=(restic)
+    [ "${LOG_LEVEL:-1}" -le 0 ] && backup_cmd+=(--quiet)
+    [ "${LOG_LEVEL:-1}" -ge 2 ] && backup_cmd+=(--verbose)
+    [ "${LOG_LEVEL:-1}" -ge 3 ] && backup_cmd+=(--verbose)
+    backup_cmd+=(backup)
+    [ -n "${BACKUP_TAG:-}" ] && backup_cmd+=(--tag "$BACKUP_TAG")
+    [ -n "${COMPRESSION:-}" ] && backup_cmd+=(--compression "$COMPRESSION")
+    [ -n "${PACK_SIZE:-}" ] && backup_cmd+=(--pack-size "$PACK_SIZE")
+    [ "${ONE_FILE_SYSTEM:-false}" = "true" ] && backup_cmd+=(--one-file-system)
+    [ -n "${EXCLUDE_FILE:-}" ] && [ -f "$EXCLUDE_FILE" ] && backup_cmd+=(--exclude-file "$EXCLUDE_FILE")
+    [ -n "${EXCLUDE_TEMP_FILE:-}" ] && backup_cmd+=(--exclude-file "$EXCLUDE_TEMP_FILE")
+    backup_cmd+=($BACKUP_SOURCES)
 
     local backup_log=$(mktemp)
     local backup_success=false
 
-    if run_with_priority $backup_cmd 2>&1 | tee "$backup_log"; then
+    if run_with_priority "${backup_cmd[@]}" 2>&1 | tee "$backup_log"; then
         backup_success=true
     fi
 
@@ -726,10 +701,15 @@ run_forget() {
     echo -e "${C_BOLD}--- Cleaning Old Snapshots ---${C_RESET}"
     log_message "Running retention policy"
 
-    local forget_cmd
-    forget_cmd=$(build_restic_command forget)
+    local forget_cmd=(restic forget)
+    [ -n "${KEEP_LAST:-}" ] && forget_cmd+=(--keep-last "$KEEP_LAST")
+    [ -n "${KEEP_DAILY:-}" ] && forget_cmd+=(--keep-daily "$KEEP_DAILY")
+    [ -n "${KEEP_WEEKLY:-}" ] && forget_cmd+=(--keep-weekly "$KEEP_WEEKLY")
+    [ -n "${KEEP_MONTHLY:-}" ] && forget_cmd+=(--keep-monthly "$KEEP_MONTHLY")
+    [ -n "${KEEP_YEARLY:-}" ] && forget_cmd+=(--keep-yearly "$KEEP_YEARLY")
+    [ "${PRUNE_AFTER_FORGET:-true}" = "true" ] && forget_cmd+=(--prune)
 
-    if run_with_priority $forget_cmd 2>&1 | tee -a "$LOG_FILE"; then
+    if run_with_priority "${forget_cmd[@]}" 2>&1 | tee -a "$LOG_FILE"; then
         log_message "Retention policy applied successfully"
         echo -e "${C_GREEN}✅ Old snapshots cleaned${C_RESET}"
     else
@@ -780,8 +760,8 @@ run_restore() {
 
     # Get restore destination
     read -p "Enter restore destination (absolute path): " restore_dest
-    if [ -z "$restore_dest" ]; then
-        echo "No destination specified, exiting"
+    if [[ -z "$restore_dest" || "$restore_dest" != /* ]]; then
+        echo -e "${C_RED}Error: Must be a non-empty, absolute path. Aborting.${C_RESET}" >&2
         return 1
     fi
 
@@ -914,8 +894,20 @@ case "${1:-}" in
     --dry-run)
         echo -e "${C_BOLD}--- Dry Run Mode ---${C_RESET}"
         run_preflight_checks
-        backup_cmd=$(build_restic_command backup)
-        run_with_priority $backup_cmd --dry-run
+        local backup_cmd=(restic)
+        [ "${LOG_LEVEL:-1}" -le 0 ] && backup_cmd+=(--quiet)
+        [ "${LOG_LEVEL:-1}" -ge 2 ] && backup_cmd+=(--verbose)
+        [ "${LOG_LEVEL:-1}" -ge 3 ] && backup_cmd+=(--verbose)
+        backup_cmd+=(backup)
+        [ -n "${BACKUP_TAG:-}" ] && backup_cmd+=(--tag "$BACKUP_TAG")
+        [ -n "${COMPRESSION:-}" ] && backup_cmd+=(--compression "$COMPRESSION")
+        [ -n "${PACK_SIZE:-}" ] && backup_cmd+=(--pack-size "$PACK_SIZE")
+        [ "${ONE_FILE_SYSTEM:-false}" = "true" ] && backup_cmd+=(--one-file-system)
+        [ -n "${EXCLUDE_FILE:-}" ] && [ -f "$EXCLUDE_FILE" ] && backup_cmd+=(--exclude-file "$EXCLUDE_FILE")
+        [ -n "${EXCLUDE_TEMP_FILE:-}" ] && backup_cmd+=(--exclude-file "$EXCLUDE_TEMP_FILE")
+        backup_cmd+=($BACKUP_SOURCES)
+        backup_cmd+=(--dry-run)
+        run_with_priority "${backup_cmd[@]}"
         ;;
     --test)
         echo -e "${C_BOLD}--- Test Mode ---${C_RESET}"
