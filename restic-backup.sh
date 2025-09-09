@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#         Restic Backup Script v0.20 - 2025.09.09
+#         Restic Backup Script v0.21 - 2025.09.09
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.20"
+SCRIPT_VERSION="0.21"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -723,12 +723,12 @@ run_restore() {
         return 1
     fi
 
-    # Offer to list snapshot contents to help find paths
+    # Offer to list snapshot contents
     local list_confirm
     read -p "Would you like to list the contents of this snapshot to find exact paths? (y/n): " list_confirm
     if [[ "${list_confirm,,}" == "y" || "${list_confirm,,}" == "yes" ]]; then
         echo -e "${C_DIM}Displaying snapshot contents (use arrow keys to scroll, 'q' to quit)...${C_RESET}"
-        restic ls -l "$snapshot_id" | less
+        less -f <(restic ls -l "$snapshot_id")
     fi
 
     # Get restore destination
@@ -741,10 +741,7 @@ run_restore() {
     # Ask for specific paths to include
     local include_paths=()
     read -p "Optional: Enter specific file(s) to restore, separated by spaces (leave blank for full restore): " -a include_paths
-
     local restic_cmd=(restic restore "$snapshot_id" --target "$restore_dest" --verbose)
-
-    # Add --include flags if paths were provided
     if [ ${#include_paths[@]} -gt 0 ]; then
         for path in "${include_paths[@]}"; do
             restic_cmd+=(--include "$path")
@@ -760,7 +757,7 @@ run_restore() {
     fi
     echo -e "${C_BOLD}--- Dry Run Complete ---${C_RESET}"
 
-    # Ask for final confirmation before proceeding
+    # Ask for final confirmation
     local proceed_confirm
     read -p "Proceed with the actual restore? (y/n): " proceed_confirm
     if [[ "${proceed_confirm,,}" != "y" && "${proceed_confirm,,}" != "yes" ]]; then
@@ -768,22 +765,47 @@ run_restore() {
         return 0
     fi
 
-    # Create destination if it doesn't exist
+    # Create destination if it doesn't exist and perform the restore
     mkdir -p "$restore_dest"
-
-    # Perform the actual restore
     echo -e "${C_BOLD}--- Performing Restore ---${C_RESET}"
     log_message "Restoring snapshot $snapshot_id to $restore_dest"
 
-    if "${restic_cmd[@]}"; then
+    #  Restore Logic
+    local restore_log
+    restore_log=$(mktemp)
+    local restore_success=false
+
+    if "${restic_cmd[@]}" 2>&1 | tee "$restore_log"; then
+        restore_success=true
+    fi
+    cat "$restore_log" >> "$LOG_FILE"
+
+    # Handle failure of the restic command
+    if [ "$restore_success" = false ]; then
+        log_message "ERROR: Restore failed"
+        echo -e "${C_RED}❌ Restore failed${C_RESET}" >&2
+        send_notification "Restore FAILED: $HOSTNAME" "x" \
+            "${NTFY_PRIORITY_FAILURE}" "failure" "Failed to restore $snapshot_id"
+        rm -f "$restore_log"
+        return 1
+    fi
+
+    # Check if the restore was successful
+    if grep -q "Summary: Restored 0 files/dirs" "$restore_log"; then
+        echo -e "\n${C_YELLOW}⚠️  Restore completed, but no files were restored.${C_RESET}"
+        echo -e "${C_YELLOW}This usually means the specific path(s) you provided do not exist in this snapshot.${C_RESET}"
+        echo "Please try the restore again and use the 'list contents' option to verify the exact path."
+        log_message "Restore completed but restored 0 files (path filter likely found no match)."
+        send_notification "Restore Notice: $HOSTNAME" "information_source" \
+            "${NTFY_PRIORITY_SUCCESS}" "warning" "Restore of $snapshot_id completed but 0 files were restored. The specified path filter may not have matched any files in the snapshot."
+    else
         log_message "Restore completed successfully"
         echo -e "${C_GREEN}✅ Restore completed${C_RESET}"
 
-        # Set file ownership
+        # Set file ownership logic
         if [[ "$restore_dest" == /home/* ]]; then
             local dest_user
             dest_user=$(echo "$restore_dest" | cut -d/ -f3)
-
             if [[ -n "$dest_user" ]] && id -u "$dest_user" &>/dev/null; then
                 echo -e "${C_CYAN}ℹ️  Home directory detected. Setting ownership of restored files to '$dest_user'...${C_RESET}"
                 if chown -R "${dest_user}:${dest_user}" "$restore_dest"; then
@@ -795,16 +817,12 @@ run_restore() {
                 fi
             fi
         fi
-
         send_notification "Restore SUCCESS: $HOSTNAME" "white_check_mark" \
             "${NTFY_PRIORITY_SUCCESS}" "success" "Restored $snapshot_id to $restore_dest"
-    else
-        log_message "ERROR: Restore failed"
-        echo -e "${C_RED}❌ Restore failed${C_RESET}" >&2
-        send_notification "Restore FAILED: $HOSTNAME" "x" \
-            "${NTFY_PRIORITY_FAILURE}" "failure" "Failed to restore $snapshot_id"
-        return 1
     fi
+
+    # Clean up the temporary log file
+    rm -f "$restore_log"
 }
 
 # =================================================================
