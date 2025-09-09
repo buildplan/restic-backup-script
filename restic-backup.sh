@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#         Restic Backup Script v0.18 - 2025.09.08
+#         Restic Backup Script v0.19 - 2025.09.09
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.18"
+SCRIPT_VERSION="0.19"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -265,6 +265,7 @@ display_help() {
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots" "List all available snapshots in the repository."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check" "Verify repository integrity by checking a subset of data."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Manually apply the retention policy and prune old data."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--unlock" "Forcibly remove stale locks from the repository."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--restore" "Start the interactive restore wizard."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dry-run" "Preview backup changes without creating a new snapshot."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--test" "Validate configuration, permissions, and SSH connectivity."
@@ -364,6 +365,49 @@ run_snapshots() {
     if ! restic snapshots; then
         log_message "ERROR: Failed to list snapshots"
         echo -e "${C_RED}❌ Failed to list snapshots. Check repository connection and credentials.${C_RESET}" >&2
+        return 1
+    fi
+}
+
+run_unlock() {
+    echo -e "${C_BOLD}--- Unlocking Repository ---${C_RESET}"
+    log_message "Attempting to unlock repository"
+
+    local lock_info
+    lock_info=$(restic list locks --repo "$RESTIC_REPOSITORY" --password-file "$RESTIC_PASSWORD_FILE")
+
+    if [ -z "$lock_info" ]; then
+        echo -e "${C_GREEN}✅ No locks found. Repository is clean.${C_RESET}"
+        log_message "No stale locks found."
+        return 0
+    fi
+
+    echo -e "${C_YELLOW}Found stale locks in the repository:${C_RESET}"
+    echo "$lock_info"
+
+    local other_processes
+    other_processes=$(ps aux | grep 'restic ' | grep -v 'grep' || true)
+
+    if [ -n "$other_processes" ]; then
+        echo -e "${C_YELLOW}WARNING: Another restic process appears to be running:${C_RESET}"
+        echo "$other_processes"
+        read -p "Are you sure you want to proceed? This could interrupt a live backup. (y/n): " confirm
+        if [[ "${confirm,,}" != "y" && "${confirm,,}" != "yes" ]]; then
+            echo "Unlock cancelled by user."
+            log_message "Unlock cancelled by user due to active processes."
+            return 1
+        fi
+    else
+        echo -e "${C_GREEN}✅ No other active restic processes found. It is safe to proceed.${C_RESET}"
+    fi
+
+    echo "Attempting to remove stale locks..."
+    if restic unlock --repo "$RESTIC_REPOSITORY" --password-file "$RESTIC_PASSWORD_FILE"; then
+        echo -e "${C_GREEN}✅ Repository unlocked successfully.${C_RESET}"
+        log_message "Repository unlocked successfully."
+    else
+        echo -e "${C_RED}❌ Failed to unlock repository.${C_RESET}" >&2
+        log_message "ERROR: Failed to unlock repository."
         return 1
     fi
 }
@@ -853,6 +897,10 @@ case "${1:-}" in
     --diff)
         run_preflight_checks "diff"
         run_diff
+        ;;
+    --unlock)
+        run_preflight_checks "unlock"
+        run_unlock
         ;;
     --help | -h)
         display_help
