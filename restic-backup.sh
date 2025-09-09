@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # =================================================================
-#         Restic Backup Script v0.21 - 2025.09.09
+#         Restic Backup Script v0.22 - 2025.09.09
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.21"
+SCRIPT_VERSION="0.22"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -475,38 +475,85 @@ cleanup() {
 
 run_preflight_checks() {
     local mode="${1:-backup}"
+    echo -e "${C_BOLD}--- Running Pre-flight Checks ---${C_RESET}"
 
-    # Check required commands
+    # System Dependencies
+    echo -e "\n  ${C_DIM}- Checking System Dependencies${C_RESET}"
+    printf "    %-65s" "Required commands (restic, curl, flock)..."
     local required_cmds=(restic curl flock)
     for cmd in "${required_cmds[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then
+            echo -e "[${C_RED} FAIL ${C_RESET}]"
             echo -e "${C_RED}ERROR: Required command '$cmd' not found${C_RESET}" >&2
             exit 10
         fi
     done
+    echo -e "[${C_GREEN}  OK  ${C_RESET}]"
 
-    # Check password file
-    if [ ! -f "$RESTIC_PASSWORD_FILE" ]; then
-        echo -e "${C_RED}ERROR: Password file not found: $RESTIC_PASSWORD_FILE${C_RESET}" >&2
+    # Configuration Files
+    echo -e "\n  ${C_DIM}- Checking Configuration Files${C_RESET}"
+    printf "    %-65s" "Password file ('$RESTIC_PASSWORD_FILE')..."
+    if [ ! -r "$RESTIC_PASSWORD_FILE" ]; then
+        echo -e "[${C_RED} FAIL ${C_RESET}]"
+        echo -e "${C_RED}ERROR: Password file not found or not readable: $RESTIC_PASSWORD_FILE${C_RESET}" >&2
         exit 11
     fi
+    echo -e "[${C_GREEN}  OK  ${C_RESET}]"
 
-    # Check repository connectivity
-    if ! restic cat config >/dev/null 2>&1; then
-        if [[ "$mode" == "init" ]]; then
-            return 0  # OK for init mode
+    if [ -n "${EXCLUDE_FILE:-}" ]; then
+        printf "    %-65s" "Exclude file ('$EXCLUDE_FILE')..."
+        if [ ! -r "$EXCLUDE_FILE" ]; then
+            echo -e "[${C_RED} FAIL ${C_RESET}]"
+            echo -e "${C_RED}ERROR: The specified EXCLUDE_FILE is not readable: ${EXCLUDE_FILE}${C_RESET}" >&2
+            exit 14
         fi
-        echo -e "${C_RED}ERROR: Cannot access repository. Run with --init first${C_RESET}" >&2
-        exit 12
+        echo -e "[${C_GREEN}  OK  ${C_RESET}]"
     fi
 
-    # Check source directories (for backup mode)
-    if [[ "$mode" == "backup" ]]; then
+    printf "    %-65s" "Log file writability ('$LOG_FILE')..."
+    if ! touch "$LOG_FILE" >/dev/null 2>&1; then
+        echo -e "[${C_RED} FAIL ${C_RESET}]"
+        echo -e "${C_RED}ERROR: The log file or its directory is not writable: ${LOG_FILE}${C_RESET}" >&2
+        exit 15
+    fi
+    echo -e "[${C_GREEN}  OK  ${C_RESET}]"
+
+    # Repository State
+    echo -e "\n  ${C_DIM}- Checking Repository State${C_RESET}"
+    printf "    %-65s" "Repository connectivity and credentials..."
+    if ! restic cat config >/dev/null 2>&1; then
+        if [[ "$mode" == "init" ]]; then
+            echo -e "[${C_YELLOW} SKIP ${C_RESET}] (OK for --init mode)"
+            return 0
+        fi
+        echo -e "[${C_RED} FAIL ${C_RESET}]"
+        echo -e "${C_RED}ERROR: Cannot access repository. Check credentials or run --init first.${C_RESET}" >&2
+        exit 12
+    fi
+    echo -e "[${C_GREEN}  OK  ${C_RESET}]"
+
+    printf "    %-65s" "Stale repository locks..."
+    local lock_info
+    lock_info=$(restic list locks 2>/dev/null || true)
+    if [ -n "$lock_info" ]; then
+        echo -e "[${C_YELLOW} WARN ${C_RESET}]"
+        echo -e "${C_YELLOW}    ⚠️  Stale locks found! This may prevent backups from running.${C_RESET}"
+        echo -e "${C_DIM}    Run the --unlock command to remove them.${C_RESET}"
+    else
+        echo -e "[${C_GREEN}  OK  ${C_RESET}]"
+    fi
+
+    # Backup Sources
+    if [[ "$mode" == "backup" || "$mode" == "diff" ]]; then
+        echo -e "\n  ${C_DIM}- Checking Backup Sources${C_RESET}"
         for source in $BACKUP_SOURCES; do
+            printf "    %-65s" "Source directory ('$source')..."
             if [ ! -d "$source" ] || [ ! -r "$source" ]; then
-                echo -e "${C_RED}ERROR: Source directory not accessible: $source${C_RESET}" >&2
+                echo -e "[${C_RED} FAIL ${C_RESET}]"
+                echo -e "${C_RED}ERROR: Source directory not found or not readable: $source${C_RESET}" >&2
                 exit 13
             fi
+            echo -e "[${C_GREEN}  OK  ${C_RESET}]"
         done
     fi
 }
