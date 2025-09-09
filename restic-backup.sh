@@ -67,14 +67,14 @@ check_and_install_restic() {
     echo -e "${C_BOLD}--- Checking Restic Version ---${C_RESET}"
 
     if ! command -v bzip2 &>/dev/null || ! command -v curl &>/dev/null || ! command -v gpg &>/dev/null; then
-        echo -e "${C_RED}ERROR: 'bzip2', 'curl', and 'gpg' are required...${C_RESET}" >&2
-        echo -e "${C_YELLOW}Please install them with: sudo apt-get install bzip2 curl gnupg${C_RESET}" >&2
+        echo -e "${C_RED}ERROR: 'bzip2', 'curl', and 'gpg' are required for secure auto-installation.${C_RESET}" >&2
+        echo -e "${C_YELLOW}On Debian based systems install with: sudo apt-get install bzip2 curl gnupg${C_RESET}" >&2
         exit 1
     fi
     local latest_version
     latest_version=$(curl -s "https://api.github.com/repos/restic/restic/releases/latest" | grep -o '"tag_name": "[^"]*"' | sed -E 's/.*"v?([^"]+)".*/\1/')
     if [ -z "$latest_version" ]; then
-        echo -e "${C_YELLOW}Could not fetch latest version from GitHub. Skipping check.${C_RESET}"
+        echo -e "${C_YELLOW}Could not fetch latest restic version from GitHub. Skipping check.${C_RESET}"
         return 0
     fi
     local local_version=""
