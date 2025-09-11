@@ -275,6 +275,22 @@ log_message() {
     fi
 }
 
+build_backup_command() {
+    local cmd=(restic)
+    [ "${LOG_LEVEL:-1}" -le 0 ] && cmd+=(--quiet)
+    [ "${LOG_LEVEL:-1}" -ge 2 ] && cmd+=(--verbose)
+    [ "${LOG_LEVEL:-1}" -ge 3 ] && cmd+=(--verbose)
+    cmd+=(backup)
+    [ -n "${BACKUP_TAG:-}" ] && cmd+=(--tag "$BACKUP_TAG")
+    [ -n "${COMPRESSION:-}" ] && cmd+=(--compression "$COMPRESSION")
+    [ -n "${PACK_SIZE:-}" ] && cmd+=(--pack-size "$PACK_SIZE")
+    [ "${ONE_FILE_SYSTEM:-false}" = "true" ] && cmd+=(--one-file-system)
+    [ -n "${EXCLUDE_FILE:-}" ] && [ -f "$EXCLUDE_FILE" ] && cmd+=(--exclude-file "$EXCLUDE_FILE")
+    [ -n "${EXCLUDE_TEMP_FILE:-}" ] && cmd+=(--exclude-file "$EXCLUDE_TEMP_FILE")
+    cmd+=("${BACKUP_SOURCES[@]}")
+    printf "%s\n" "${cmd[@]}"
+}
+
 run_diff() {
     echo -e "${C_BOLD}--- Generating Backup Summary ---${C_RESET}"
     log_message "Generating backup summary (diff)"
@@ -284,7 +300,7 @@ run_diff() {
         return 1
     fi
     local path_args=()
-    for p in $BACKUP_SOURCES; do
+    for p in "${BACKUP_SOURCES[@]}"; do
         path_args+=(--path "$p")
     done
     local snapshot_json
@@ -656,21 +672,10 @@ run_backup() {
     local start_time=$(date +%s)
 
     echo -e "${C_BOLD}--- Starting Backup ---${C_RESET}"
-    log_message "Starting backup of: $BACKUP_SOURCES"
+    log_message "Starting backup of: ${BACKUP_SOURCES[*]}"
 
-    # Build and execute backup command
-    backup_cmd=(restic)
-    [ "${LOG_LEVEL:-1}" -le 0 ] && backup_cmd+=(--quiet)
-    [ "${LOG_LEVEL:-1}" -ge 2 ] && backup_cmd+=(--verbose)
-    [ "${LOG_LEVEL:-1}" -ge 3 ] && backup_cmd+=(--verbose)
-    backup_cmd+=(backup)
-    [ -n "${BACKUP_TAG:-}" ] && backup_cmd+=(--tag "$BACKUP_TAG")
-    [ -n "${COMPRESSION:-}" ] && backup_cmd+=(--compression "$COMPRESSION")
-    [ -n "${PACK_SIZE:-}" ] && backup_cmd+=(--pack-size "$PACK_SIZE")
-    [ "${ONE_FILE_SYSTEM:-false}" = "true" ] && backup_cmd+=(--one-file-system)
-    [ -n "${EXCLUDE_FILE:-}" ] && [ -f "$EXCLUDE_FILE" ] && backup_cmd+=(--exclude-file "$EXCLUDE_FILE")
-    [ -n "${EXCLUDE_TEMP_FILE:-}" ] && backup_cmd+=(--exclude-file "$EXCLUDE_TEMP_FILE")
-    backup_cmd+=($BACKUP_SOURCES)
+    local backup_cmd=()
+    mapfile -t backup_cmd < <(build_backup_command)
 
     local backup_log=$(mktemp)
     local backup_success=false
@@ -983,18 +988,8 @@ case "${1:-}" in
     --dry-run)
         echo -e "${C_BOLD}--- Dry Run Mode ---${C_RESET}"
         run_preflight_checks "backup" "quiet"
-        backup_cmd=(restic)
-        [ "${LOG_LEVEL:-1}" -le 0 ] && backup_cmd+=(--quiet)
-        [ "${LOG_LEVEL:-1}" -ge 2 ] && backup_cmd+=(--verbose)
-        [ "${LOG_LEVEL:-1}" -ge 3 ] && backup_cmd+=(--verbose)
-        backup_cmd+=(backup)
-        [ -n "${BACKUP_TAG:-}" ] && backup_cmd+=(--tag "$BACKUP_TAG")
-        [ -n "${COMPRESSION:-}" ] && backup_cmd+=(--compression "$COMPRESSION")
-        [ -n "${PACK_SIZE:-}" ] && backup_cmd+=(--pack-size "$PACK_SIZE")
-        [ "${ONE_FILE_SYSTEM:-false}" = "true" ] && backup_cmd+=(--one-file-system)
-        [ -n "${EXCLUDE_FILE:-}" ] && [ -f "$EXCLUDE_FILE" ] && backup_cmd+=(--exclude-file "$EXCLUDE_FILE")
-        [ -n "${EXCLUDE_TEMP_FILE:-}" ] && backup_cmd+=(--exclude-file "$EXCLUDE_TEMP_FILE")
-        backup_cmd+=($BACKUP_SOURCES)
+        local backup_cmd=()
+        mapfile -t backup_cmd < <(build_backup_command)
         backup_cmd+=(--dry-run)
         run_with_priority "${backup_cmd[@]}"
         ;;
