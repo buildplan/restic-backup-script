@@ -566,7 +566,7 @@ run_preflight_checks() {
     # Backup Sources
     if [[ "$mode" == "backup" || "$mode" == "diff" ]]; then
         if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Backup Sources${C_RESET}"; fi
-        for source in $BACKUP_SOURCES; do
+        for source in "${BACKUP_SOURCES[@]}"; do
             if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Source directory ('$source')..."; fi
             if [ ! -d "$source" ] || [ ! -r "$source" ]; then
                 [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
