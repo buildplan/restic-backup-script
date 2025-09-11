@@ -992,7 +992,7 @@ case "${1:-}" in
     --dry-run)
         echo -e "${C_BOLD}--- Dry Run Mode ---${C_RESET}"
         run_preflight_checks "backup" "quiet"
-        local backup_cmd=()
+        backup_cmd=()
         mapfile -t backup_cmd < <(build_backup_command)
         backup_cmd+=(--dry-run)
         run_with_priority "${backup_cmd[@]}"
