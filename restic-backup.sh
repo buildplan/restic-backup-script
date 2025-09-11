@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.25 - 2025.09.11
+#         Restic Backup Script v0.26 - 2025.09.11
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.25"
+SCRIPT_VERSION="0.26"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -252,6 +252,7 @@ display_help() {
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--init" "Initialize a new restic repository (one-time setup)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--diff" "Show a summary of changes between the last two snapshots."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots" "List all available snapshots in the repository."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots-delete" "Interactively select and permanently delete specific snapshots."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check" "Verify repository integrity by checking a subset of data."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Manually apply the retention policy and prune old data."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--unlock" "Forcibly remove stale locks from the repository."
@@ -274,6 +275,22 @@ log_message() {
     fi
 }
 
+build_backup_command() {
+    local cmd=(restic)
+    [ "${LOG_LEVEL:-1}" -le 0 ] && cmd+=(--quiet)
+    [ "${LOG_LEVEL:-1}" -ge 2 ] && cmd+=(--verbose)
+    [ "${LOG_LEVEL:-1}" -ge 3 ] && cmd+=(--verbose)
+    cmd+=(backup)
+    [ -n "${BACKUP_TAG:-}" ] && cmd+=(--tag "$BACKUP_TAG")
+    [ -n "${COMPRESSION:-}" ] && cmd+=(--compression "$COMPRESSION")
+    [ -n "${PACK_SIZE:-}" ] && cmd+=(--pack-size "$PACK_SIZE")
+    [ "${ONE_FILE_SYSTEM:-false}" = "true" ] && cmd+=(--one-file-system)
+    [ -n "${EXCLUDE_FILE:-}" ] && [ -f "$EXCLUDE_FILE" ] && cmd+=(--exclude-file "$EXCLUDE_FILE")
+    [ -n "${EXCLUDE_TEMP_FILE:-}" ] && cmd+=(--exclude-file "$EXCLUDE_TEMP_FILE")
+    cmd+=("${BACKUP_SOURCES[@]}")
+    printf "%s\n" "${cmd[@]}"
+}
+
 run_diff() {
     echo -e "${C_BOLD}--- Generating Backup Summary ---${C_RESET}"
     log_message "Generating backup summary (diff)"
@@ -283,7 +300,7 @@ run_diff() {
         return 1
     fi
     local path_args=()
-    for p in $BACKUP_SOURCES; do
+    for p in "${BACKUP_SOURCES[@]}"; do
         path_args+=(--path "$p")
     done
     local snapshot_json
@@ -487,6 +504,19 @@ run_preflight_checks() {
     local mode="${1:-backup}"
     local verbosity="${2:-quiet}"
 
+    # Helper function for failure
+    handle_failure() {
+        local error_message="$1"
+        local notification_title="Pre-flight Check FAILED: $HOSTNAME"
+        local full_error_message="ERROR: $error_message"
+        log_message "$full_error_message"
+        [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
+        echo -e "${C_RED}$full_error_message${C_RESET}" >&2
+        send_notification "$notification_title" "x" \
+            "${NTFY_PRIORITY_FAILURE}" "failure" "$error_message"
+        exit 1
+    }
+
     if [[ "$verbosity" == "verbose" ]]; then
         echo -e "${C_BOLD}--- Running Pre-flight Checks ---${C_RESET}"
     fi
@@ -499,9 +529,7 @@ run_preflight_checks() {
     local required_cmds=(restic curl flock)
     for cmd in "${required_cmds[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then
-            [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
-            echo -e "${C_RED}ERROR: Required command '$cmd' not found${C_RESET}" >&2
-            exit 10
+            handle_failure "Required command '$cmd' not found."
         fi
     done
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
@@ -511,27 +539,21 @@ run_preflight_checks() {
 
     if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Password file ('$RESTIC_PASSWORD_FILE')..."; fi
     if [ ! -r "$RESTIC_PASSWORD_FILE" ]; then
-        [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
-        echo -e "${C_RED}ERROR: Password file not found or not readable: $RESTIC_PASSWORD_FILE${C_RESET}" >&2
-        exit 11
+        handle_failure "Password file not found or not readable: $RESTIC_PASSWORD_FILE"
     fi
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
 
     if [ -n "${EXCLUDE_FILE:-}" ]; then
         if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Exclude file ('$EXCLUDE_FILE')..."; fi
         if [ ! -r "$EXCLUDE_FILE" ]; then
-            [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
-            echo -e "${C_RED}ERROR: The specified EXCLUDE_FILE is not readable: ${EXCLUDE_FILE}${C_RESET}" >&2
-            exit 14
+            handle_failure "The specified EXCLUDE_FILE is not readable: ${EXCLUDE_FILE}"
         fi
         if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     fi
 
     if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Log file writability ('$LOG_FILE')..."; fi
     if ! touch "$LOG_FILE" >/dev/null 2>&1; then
-        [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
-        echo -e "${C_RED}ERROR: The log file or its directory is not writable: ${LOG_FILE}${C_RESET}" >&2
-        exit 15
+        handle_failure "The log file or its directory is not writable: ${LOG_FILE}"
     fi
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
 
@@ -544,9 +566,7 @@ run_preflight_checks() {
             if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_YELLOW} SKIP ${C_RESET}] (OK for --init mode)"; fi
             return 0
         fi
-        [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
-        echo -e "${C_RED}ERROR: Cannot access repository. Check credentials or run --init first.${C_RESET}" >&2
-        exit 12
+        handle_failure "Cannot access repository. Check credentials or run --init first."
     fi
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
 
@@ -566,12 +586,13 @@ run_preflight_checks() {
     # Backup Sources
     if [[ "$mode" == "backup" || "$mode" == "diff" ]]; then
         if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Backup Sources${C_RESET}"; fi
+        if ! declare -p BACKUP_SOURCES 2>/dev/null | grep -q "declare -a"; then
+            handle_failure "Configuration Error: BACKUP_SOURCES is not a valid array. Example: BACKUP_SOURCES=('/path/one' '/path/two')"
+        fi
         for source in "${BACKUP_SOURCES[@]}"; do
             if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Source directory ('$source')..."; fi
             if [ ! -d "$source" ] || [ ! -r "$source" ]; then
-                [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
-                echo -e "${C_RED}ERROR: Source directory not found or not readable: $source${C_RESET}" >&2
-                exit 13
+                handle_failure "Source directory not found or not readable: $source"
             fi
             if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
         done
@@ -655,21 +676,10 @@ run_backup() {
     local start_time=$(date +%s)
 
     echo -e "${C_BOLD}--- Starting Backup ---${C_RESET}"
-    log_message "Starting backup of: $BACKUP_SOURCES"
+    log_message "Starting backup of: ${BACKUP_SOURCES[*]}"
 
-    # Build and execute backup command
-    backup_cmd=(restic)
-    [ "${LOG_LEVEL:-1}" -le 0 ] && backup_cmd+=(--quiet)
-    [ "${LOG_LEVEL:-1}" -ge 2 ] && backup_cmd+=(--verbose)
-    [ "${LOG_LEVEL:-1}" -ge 3 ] && backup_cmd+=(--verbose)
-    backup_cmd+=(backup)
-    [ -n "${BACKUP_TAG:-}" ] && backup_cmd+=(--tag "$BACKUP_TAG")
-    [ -n "${COMPRESSION:-}" ] && backup_cmd+=(--compression "$COMPRESSION")
-    [ -n "${PACK_SIZE:-}" ] && backup_cmd+=(--pack-size "$PACK_SIZE")
-    [ "${ONE_FILE_SYSTEM:-false}" = "true" ] && backup_cmd+=(--one-file-system)
-    [ -n "${EXCLUDE_FILE:-}" ] && [ -f "$EXCLUDE_FILE" ] && backup_cmd+=(--exclude-file "$EXCLUDE_FILE")
-    [ -n "${EXCLUDE_TEMP_FILE:-}" ] && backup_cmd+=(--exclude-file "$EXCLUDE_TEMP_FILE")
-    backup_cmd+=($BACKUP_SOURCES)
+    local backup_cmd=()
+    mapfile -t backup_cmd < <(build_backup_command)
 
     local backup_log=$(mktemp)
     local backup_success=false
@@ -875,6 +885,71 @@ run_restore() {
     rm -f "$restore_log"
 }
 
+run_snapshots_delete() {
+    echo -e "${C_BOLD}--- Interactively Delete Snapshots ---${C_RESET}"
+    echo -e "${C_BOLD}${C_RED}WARNING: This operation is permanent and cannot be undone.${C_RESET}"
+    echo
+
+    # List available snapshots for the user
+    echo "Available snapshots:"
+    if ! restic snapshots --compact; then
+        echo -e "${C_RED}❌ Could not list snapshots. Aborting.${C_RESET}" >&2
+        return 1
+    fi
+    echo
+
+    # Prompt user for snapshot IDs
+    local -a ids_to_delete
+    read -p "Enter snapshot ID(s) to delete, separated by spaces: " -a ids_to_delete
+
+    if [ ${#ids_to_delete[@]} -eq 0 ]; then
+        echo "No snapshot IDs entered. Aborting."
+        return 1
+    fi
+
+    # Final confirmation
+    echo -e "\nYou have selected the following ${C_YELLOW}${#ids_to_delete[@]} snapshot(s)${C_RESET} for deletion:"
+    for id in "${ids_to_delete[@]}"; do
+        echo "  - $id"
+    done
+    echo
+
+    read -p "Are you absolutely sure you want to PERMANENTLY delete these snapshots? (Type 'yes' to confirm): " confirm
+    if [[ "$confirm" != "yes" ]]; then
+        echo "Confirmation not received. Aborting deletion."
+        return 0
+    fi
+
+    # Execute the forget command
+    echo -e "${C_BOLD}--- Deleting Snapshots ---${C_RESET}"
+    log_message "User initiated deletion of snapshots: ${ids_to_delete[*]}"
+
+    if restic forget "${ids_to_delete[@]}"; then
+        log_message "Successfully forgot snapshots: ${ids_to_delete[*]}"
+        echo -e "${C_GREEN}✅ Snapshots successfully deleted.${C_RESET}"
+    else
+        log_message "ERROR: Failed to forget snapshots: ${ids_to_delete[*]}"
+        echo -e "${C_RED}❌ Failed to delete snapshots.${C_RESET}" >&2
+        return 1
+    fi
+
+    # Offer to run prune
+    read -p "Would you like to run 'prune' now to reclaim disk space? (y/n): " prune_confirm
+    if [[ "${prune_confirm,,}" == "y" || "${prune_confirm,,}" == "yes" ]]; then
+        echo -e "${C_BOLD}--- Pruning Repository ---${C_RESET}"
+        log_message "Running prune after manual forget"
+        if run_with_priority restic prune; then
+            log_message "Prune completed successfully."
+            echo -e "${C_GREEN}✅ Repository pruned.${C_RESET}"
+        else
+            log_message "ERROR: Prune failed after manual forget."
+            echo -e "${C_RED}❌ Prune failed.${C_RESET}" >&2
+        fi
+    else
+        echo -e "${C_CYAN}ℹ️  Skipping prune. Run '--forget' or 'restic prune' later to reclaim space.${C_RESET}"
+    fi
+}
+
 # =================================================================
 # MAIN SCRIPT EXECUTION
 # =================================================================
@@ -917,18 +992,8 @@ case "${1:-}" in
     --dry-run)
         echo -e "${C_BOLD}--- Dry Run Mode ---${C_RESET}"
         run_preflight_checks "backup" "quiet"
-        backup_cmd=(restic)
-        [ "${LOG_LEVEL:-1}" -le 0 ] && backup_cmd+=(--quiet)
-        [ "${LOG_LEVEL:-1}" -ge 2 ] && backup_cmd+=(--verbose)
-        [ "${LOG_LEVEL:-1}" -ge 3 ] && backup_cmd+=(--verbose)
-        backup_cmd+=(backup)
-        [ -n "${BACKUP_TAG:-}" ] && backup_cmd+=(--tag "$BACKUP_TAG")
-        [ -n "${COMPRESSION:-}" ] && backup_cmd+=(--compression "$COMPRESSION")
-        [ -n "${PACK_SIZE:-}" ] && backup_cmd+=(--pack-size "$PACK_SIZE")
-        [ "${ONE_FILE_SYSTEM:-false}" = "true" ] && backup_cmd+=(--one-file-system)
-        [ -n "${EXCLUDE_FILE:-}" ] && [ -f "$EXCLUDE_FILE" ] && backup_cmd+=(--exclude-file "$EXCLUDE_FILE")
-        [ -n "${EXCLUDE_TEMP_FILE:-}" ] && backup_cmd+=(--exclude-file "$EXCLUDE_TEMP_FILE")
-        backup_cmd+=($BACKUP_SOURCES)
+        backup_cmd=()
+        mapfile -t backup_cmd < <(build_backup_command)
         backup_cmd+=(--dry-run)
         run_with_priority "${backup_cmd[@]}"
         ;;
@@ -956,6 +1021,10 @@ case "${1:-}" in
     --diff)
         run_preflight_checks "diff" "quiet"
         run_diff
+        ;;
+    --snapshots-delete)
+        run_preflight_checks "backup" "quiet"
+        run_snapshots_delete
         ;;
     --unlock)
         run_preflight_checks "unlock" "quiet"
