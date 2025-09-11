@@ -904,7 +904,7 @@ run_snapshots_delete() {
     fi
 
     # Final confirmation
-    echo -e "\nYou have selected the following ${C_YELLOW}${!#ids_to_delete[@]} snapshot(s)${C_RESET} for deletion:"
+    echo -e "\nYou have selected the following ${C_YELLOW}${#ids_to_delete[@]} snapshot(s)${C_RESET} for deletion:"
     for id in "${ids_to_delete[@]}"; do
         echo "  - $id"
     done
