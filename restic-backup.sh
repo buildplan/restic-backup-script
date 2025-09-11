@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.24 - 2025.09.10
+#         Restic Backup Script v0.25 - 2025.09.11
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.24"
+SCRIPT_VERSION="0.25"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -61,7 +61,7 @@ import_restic_key() {
         fi
     fi
     # Try public keyservers fallback
-    local servers=( "hkps://hkps.pool.sks-keyservers.net" "hkps://keys.openpgp.org" "hkps://keyserver.ubuntu.com" )
+    local servers=( "hkps://keys.openpgp.org" "hkps://keyserver.ubuntu.com" )
     for server in "${servers[@]}"; do
         echo "Attempting to fetch from $server..."
         if gpg --keyserver "$server" --recv-keys "$fpr"; then
