@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.25 - 2025.09.11
+#         Restic Backup Script v0.26 - 2025.09.11
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.25"
+SCRIPT_VERSION="0.26"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -252,6 +252,7 @@ display_help() {
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--init" "Initialize a new restic repository (one-time setup)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--diff" "Show a summary of changes between the last two snapshots."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots" "List all available snapshots in the repository."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots-delete" "Interactively select and permanently delete specific snapshots."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check" "Verify repository integrity by checking a subset of data."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Manually apply the retention policy and prune old data."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--unlock" "Forcibly remove stale locks from the repository."
@@ -875,6 +876,71 @@ run_restore() {
     rm -f "$restore_log"
 }
 
+run_snapshots_delete() {
+    echo -e "${C_BOLD}--- Interactively Delete Snapshots ---${C_RESET}"
+    echo -e "${C_BOLD}${C_RED}WARNING: This operation is permanent and cannot be undone.${C_RESET}"
+    echo
+
+    # List available snapshots for the user
+    echo "Available snapshots:"
+    if ! restic snapshots --compact; then
+        echo -e "${C_RED}❌ Could not list snapshots. Aborting.${C_RESET}" >&2
+        return 1
+    fi
+    echo
+
+    # Prompt user for snapshot IDs
+    local -a ids_to_delete
+    read -p "Enter snapshot ID(s) to delete, separated by spaces: " -a ids_to_delete
+
+    if [ ${#ids_to_delete[@]} -eq 0 ]; then
+        echo "No snapshot IDs entered. Aborting."
+        return 1
+    fi
+
+    # Final confirmation
+    echo -e "\nYou have selected the following ${C_YELLOW}${!#ids_to_delete[@]} snapshot(s)${C_RESET} for deletion:"
+    for id in "${ids_to_delete[@]}"; do
+        echo "  - $id"
+    done
+    echo
+
+    read -p "Are you absolutely sure you want to PERMANENTLY delete these snapshots? (Type 'yes' to confirm): " confirm
+    if [[ "$confirm" != "yes" ]]; then
+        echo "Confirmation not received. Aborting deletion."
+        return 0
+    fi
+
+    # Execute the forget command
+    echo -e "${C_BOLD}--- Deleting Snapshots ---${C_RESET}"
+    log_message "User initiated deletion of snapshots: ${ids_to_delete[*]}"
+
+    if restic forget "${ids_to_delete[@]}"; then
+        log_message "Successfully forgot snapshots: ${ids_to_delete[*]}"
+        echo -e "${C_GREEN}✅ Snapshots successfully deleted.${C_RESET}"
+    else
+        log_message "ERROR: Failed to forget snapshots: ${ids_to_delete[*]}"
+        echo -e "${C_RED}❌ Failed to delete snapshots.${C_RESET}" >&2
+        return 1
+    fi
+
+    # Offer to run prune
+    read -p "Would you like to run 'prune' now to reclaim disk space? (y/n): " prune_confirm
+    if [[ "${prune_confirm,,}" == "y" || "${prune_confirm,,}" == "yes" ]]; then
+        echo -e "${C_BOLD}--- Pruning Repository ---${C_RESET}"
+        log_message "Running prune after manual forget"
+        if run_with_priority restic prune; then
+            log_message "Prune completed successfully."
+            echo -e "${C_GREEN}✅ Repository pruned.${C_RESET}"
+        else
+            log_message "ERROR: Prune failed after manual forget."
+            echo -e "${C_RED}❌ Prune failed.${C_RESET}" >&2
+        fi
+    else
+        echo -e "${C_CYAN}ℹ️  Skipping prune. Run '--forget' or 'restic prune' later to reclaim space.${C_RESET}"
+    fi
+}
+
 # =================================================================
 # MAIN SCRIPT EXECUTION
 # =================================================================
@@ -956,6 +1022,10 @@ case "${1:-}" in
     --diff)
         run_preflight_checks "diff" "quiet"
         run_diff
+        ;;
+    --snapshots-delete)
+        run_preflight_checks "backup" "quiet"
+        run_snapshots_delete
         ;;
     --unlock)
         run_preflight_checks "unlock" "quiet"
