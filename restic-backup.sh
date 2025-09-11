@@ -504,6 +504,19 @@ run_preflight_checks() {
     local mode="${1:-backup}"
     local verbosity="${2:-quiet}"
 
+    # Helper function for failure
+    handle_failure() {
+        local error_message="$1"
+        local notification_title="Pre-flight Check FAILED: $HOSTNAME"
+        local full_error_message="ERROR: $error_message"
+        log_message "$full_error_message"
+        [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
+        echo -e "${C_RED}$full_error_message${C_RESET}" >&2
+        send_notification "$notification_title" "x" \
+            "${NTFY_PRIORITY_FAILURE}" "failure" "$error_message"
+        exit 1
+    }
+
     if [[ "$verbosity" == "verbose" ]]; then
         echo -e "${C_BOLD}--- Running Pre-flight Checks ---${C_RESET}"
     fi
@@ -516,9 +529,7 @@ run_preflight_checks() {
     local required_cmds=(restic curl flock)
     for cmd in "${required_cmds[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then
-            [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
-            echo -e "${C_RED}ERROR: Required command '$cmd' not found${C_RESET}" >&2
-            exit 10
+            handle_failure "Required command '$cmd' not found."
         fi
     done
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
@@ -528,27 +539,21 @@ run_preflight_checks() {
 
     if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Password file ('$RESTIC_PASSWORD_FILE')..."; fi
     if [ ! -r "$RESTIC_PASSWORD_FILE" ]; then
-        [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
-        echo -e "${C_RED}ERROR: Password file not found or not readable: $RESTIC_PASSWORD_FILE${C_RESET}" >&2
-        exit 11
+        handle_failure "Password file not found or not readable: $RESTIC_PASSWORD_FILE"
     fi
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
 
     if [ -n "${EXCLUDE_FILE:-}" ]; then
         if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Exclude file ('$EXCLUDE_FILE')..."; fi
         if [ ! -r "$EXCLUDE_FILE" ]; then
-            [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
-            echo -e "${C_RED}ERROR: The specified EXCLUDE_FILE is not readable: ${EXCLUDE_FILE}${C_RESET}" >&2
-            exit 14
+            handle_failure "The specified EXCLUDE_FILE is not readable: ${EXCLUDE_FILE}"
         fi
         if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     fi
 
     if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Log file writability ('$LOG_FILE')..."; fi
     if ! touch "$LOG_FILE" >/dev/null 2>&1; then
-        [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
-        echo -e "${C_RED}ERROR: The log file or its directory is not writable: ${LOG_FILE}${C_RESET}" >&2
-        exit 15
+        handle_failure "The log file or its directory is not writable: ${LOG_FILE}"
     fi
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
 
@@ -561,9 +566,7 @@ run_preflight_checks() {
             if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_YELLOW} SKIP ${C_RESET}] (OK for --init mode)"; fi
             return 0
         fi
-        [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
-        echo -e "${C_RED}ERROR: Cannot access repository. Check credentials or run --init first.${C_RESET}" >&2
-        exit 12
+        handle_failure "Cannot access repository. Check credentials or run --init first."
     fi
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
 
@@ -584,18 +587,12 @@ run_preflight_checks() {
     if [[ "$mode" == "backup" || "$mode" == "diff" ]]; then
         if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Backup Sources${C_RESET}"; fi
         if ! declare -p BACKUP_SOURCES 2>/dev/null | grep -q "declare -a"; then
-            echo -e "[${C_RED} FAIL ${C_RESET}]"
-            echo -e "${C_RED}Configuration Error: BACKUP_SOURCES is not a valid array.${C_RESET}" >&2
-            echo -e "${C_YELLOW}Use the correct Bash array syntax in your restic-backup.conf file.${C_RESET}" >&2
-            echo -e "Example: ${C_GREEN}BACKUP_SOURCES=(\"/path/one\" \"/path with spaces/two\")${C_RESET}" >&2
-            exit 1
+            handle_failure "Configuration Error: BACKUP_SOURCES is not a valid array. Example: BACKUP_SOURCES=('/path/one' '/path/two')"
         fi
         for source in "${BACKUP_SOURCES[@]}"; do
             if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Source directory ('$source')..."; fi
             if [ ! -d "$source" ] || [ ! -r "$source" ]; then
-                [[ "$verbosity" == "verbose" ]] && echo -e "[${C_RED} FAIL ${C_RESET}]"
-                echo -e "${C_RED}ERROR: Source directory not found or not readable: $source${C_RESET}" >&2
-                exit 13
+                handle_failure "Source directory not found or not readable: $source"
             fi
             if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
         done
