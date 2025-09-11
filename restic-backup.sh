@@ -583,6 +583,13 @@ run_preflight_checks() {
     # Backup Sources
     if [[ "$mode" == "backup" || "$mode" == "diff" ]]; then
         if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Backup Sources${C_RESET}"; fi
+        if ! declare -p BACKUP_SOURCES 2>/dev/null | grep -q "declare -a"; then
+            echo -e "[${C_RED} FAIL ${C_RESET}]"
+            echo -e "${C_RED}Configuration Error: BACKUP_SOURCES is not a valid array.${C_RESET}" >&2
+            echo -e "${C_YELLOW}Use the correct Bash array syntax in your restic-backup.conf file.${C_RESET}" >&2
+            echo -e "Example: ${C_GREEN}BACKUP_SOURCES=(\"/path/one\" \"/path with spaces/two\")${C_RESET}" >&2
+            exit 1
+        fi
         for source in "${BACKUP_SOURCES[@]}"; do
             if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Source directory ('$source')..."; fi
             if [ ! -d "$source" ] || [ ! -r "$source" ]; then
