@@ -248,6 +248,7 @@ display_help() {
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots" "List all available snapshots in the repository."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots-delete" "Interactively select and permanently delete specific snapshots."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check" "Verify repository integrity by checking a subset of data."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check-full" "Run a FULL, slow check verifying all repository data."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Manually apply the retention policy and prune old data."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--unlock" "Forcibly remove stale locks from the repository."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--restore" "Start the interactive restore wizard."
@@ -705,6 +706,21 @@ run_check() {
     fi
 }
 
+run_check_full() {
+    echo -e "${C_BOLD}--- Checking Repository Integrity (Full Data Scan) ---${C_RESET}"
+    echo -e "${C_YELLOW}⚠️  This will read ALL data and may be slow and consume significant bandwidth.${C_RESET}"
+    log_message "Running FULL integrity check (--read-data)"
+    if restic check --read-data 2>&1 | tee -a "$LOG_FILE"; then
+        log_message "Full integrity check passed"
+        echo -e "${C_GREEN}✅ Repository integrity OK (Full data scan complete).${C_RESET}"
+    else
+        log_message "CRITICAL: Full integrity check FAILED"
+        echo -e "${C_RED}❌ CRITICAL: Full integrity check FAILED.${C_RESET}" >&2
+        send_notification "Repository Check FAILED: $HOSTNAME" "x" \
+            "${NTFY_PRIORITY_FAILURE}" "failure" "CRITICAL: A full repository integrity check (--read-data) has failed!"
+    fi
+}
+
 run_restore() {
     echo -e "${C_BOLD}--- Restore Mode ---${C_RESET}"
     echo "Available snapshots:"
@@ -904,6 +920,10 @@ case "${1:-}" in
         run_preflight_checks "backup" "quiet"
         run_check
         ;;
+    --check-full)
+        run_preflight_checks "backup" "quiet"
+        run_check_full
+        ;;
     --forget)
         run_preflight_checks "backup" "quiet"
         run_forget
@@ -939,5 +959,12 @@ case "${1:-}" in
         fi
         log_message "=== Backup run completed ==="
         ;;
+            # --- Ping Healthchecks.io on success ---
+            if [[ -n "${HEALTHCHECKS_URL:-}" ]]; then
+                log_message "Pinging Healthchecks.io to signal successful run."
+                curl -fsS -m 15 --retry 3 "${HEALTHCHECKS_URL}" >/dev/null 2>>"$LOG_FILE"
+            fi
+            ;;
 esac
+
 echo -e "${C_BOLD}--- Backup Script Completed ---${C_RESET}"
