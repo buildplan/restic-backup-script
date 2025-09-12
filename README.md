@@ -18,6 +18,7 @@ This script automates encrypted, deduplicated backups of local directories to a 
   - **Multiple Operation Modes**: Supports standard backups, dry runs, integrity checks, difference summaries, and a safe, interactive restore mode. 
   - **Concurrency Control & Logging**: Prevents multiple instances from running simultaneously and handles its own log rotation.
   - **Pre-run Validation**: Performs checks for required commands and repository connectivity before execution.
+  - **Cron Job Monitoring**: Optional integration with [Healthchecks.io](https://healthchecks.io) for alerts if a backup job fails to run on schedule.
 
 -----
 
