@@ -475,6 +475,7 @@ run_preflight_checks() {
     # Helper function for failure
     handle_failure() {
         local error_message="$1"
+        local exit_code="${2:-1}"
         local notification_title="Pre-flight Check FAILED: $HOSTNAME"
         local full_error_message="ERROR: $error_message"
         log_message "$full_error_message"
@@ -482,7 +483,7 @@ run_preflight_checks() {
         echo -e "${C_RED}$full_error_message${C_RESET}" >&2
         send_notification "$notification_title" "x" \
             "${NTFY_PRIORITY_FAILURE}" "failure" "$error_message"
-        exit 1
+        exit "$exit_code"
     }
     if [[ "$verbosity" == "verbose" ]]; then
         echo -e "${C_BOLD}--- Running Pre-flight Checks ---${C_RESET}"
@@ -495,14 +496,14 @@ run_preflight_checks() {
     local required_cmds=(restic curl flock)
     for cmd in "${required_cmds[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then
-            handle_failure "Required command '$cmd' not found."
+            handle_failure "Required command '$cmd' not found." "10"
         fi
     done
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     if [[ "$mode" == "diff" ]]; then
         if [[ "$verbosity" == "verbose" ]]; then printf "     %-65s" "jq command for --diff..."; fi
         if ! command -v jq &>/dev/null; then
-            handle_failure "'jq' is required for the --diff command. Install on Debian based system with sudo apt install jq"
+            handle_failure "'jq' is required for the --diff command. Install on Debian based system with sudo apt install jq" "10"
         fi
         if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     fi
@@ -510,19 +511,19 @@ run_preflight_checks() {
     if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Configuration Files${C_RESET}"; fi
     if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Password file ('$RESTIC_PASSWORD_FILE')..."; fi
     if [ ! -r "$RESTIC_PASSWORD_FILE" ]; then
-        handle_failure "Password file not found or not readable: $RESTIC_PASSWORD_FILE"
+        handle_failure "Password file not found or not readable: $RESTIC_PASSWORD_FILE" "11"
     fi
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     if [ -n "${EXCLUDE_FILE:-}" ]; then
         if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Exclude file ('$EXCLUDE_FILE')..."; fi
         if [ ! -r "$EXCLUDE_FILE" ]; then
-            handle_failure "The specified EXCLUDE_FILE is not readable: ${EXCLUDE_FILE}"
+            handle_failure "The specified EXCLUDE_FILE is not readable: ${EXCLUDE_FILE}" "14"
         fi
         if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     fi
     if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Log file writability ('$LOG_FILE')..."; fi
     if ! touch "$LOG_FILE" >/dev/null 2>&1; then
-        handle_failure "The log file or its directory is not writable: ${LOG_FILE}"
+        handle_failure "The log file or its directory is not writable: ${LOG_FILE}" "15"
     fi
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     # Repository State
@@ -533,7 +534,7 @@ run_preflight_checks() {
             if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_YELLOW} SKIP ${C_RESET}] (OK for --init mode)"; fi
             return 0
         fi
-        handle_failure "Cannot access repository. Check credentials or run --init first."
+        handle_failure "Cannot access repository. Check credentials or run --init first." "12"
     fi
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Stale repository locks..."; fi
@@ -557,7 +558,7 @@ run_preflight_checks() {
         for source in "${BACKUP_SOURCES[@]}"; do
             if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Source directory ('$source')..."; fi
             if [ ! -d "$source" ] || [ ! -r "$source" ]; then
-                handle_failure "Source directory not found or not readable: $source"
+                handle_failure "Source directory not found or not readable: $source" "13"
             fi
             if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
         done
