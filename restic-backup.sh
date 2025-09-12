@@ -958,13 +958,13 @@ case "${1:-}" in
             fi
         fi
         log_message "=== Backup run completed ==="
+
+        # --- Ping Healthchecks.io on success ---
+        if [[ -n "${HEALTHCHECKS_URL:-}" ]]; then
+            log_message "Pinging Healthchecks.io to signal successful run."
+            curl -fsS -m 15 --retry 3 "${HEALTHCHECKS_URL}" >/dev/null 2>>"$LOG_FILE"
+        fi
         ;;
-            # --- Ping Healthchecks.io on success ---
-            if [[ -n "${HEALTHCHECKS_URL:-}" ]]; then
-                log_message "Pinging Healthchecks.io to signal successful run."
-                curl -fsS -m 15 --retry 3 "${HEALTHCHECKS_URL}" >/dev/null 2>>"$LOG_FILE"
-            fi
-            ;;
 esac
 
 echo -e "${C_BOLD}--- Backup Script Completed ---${C_RESET}"
