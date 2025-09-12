@@ -874,7 +874,7 @@ run_snapshots_delete() {
 check_for_script_update
 check_and_install_restic
 trap cleanup EXIT
-trap 'send_notification "Backup Crashed: $HOSTNAME" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly"' ERR
+trap 'log_message "FATAL: Script terminated unexpectedly on line $LINENO. Sending crash notification."; send_notification "Backup Crashed: $HOSTNAME" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly on line $LINENO."' ERR
 VERBOSE_MODE=false
 if [[ "${1:-}" == "--verbose" ]]; then
     VERBOSE_MODE=true
