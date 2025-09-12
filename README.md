@@ -18,6 +18,7 @@ This script automates encrypted, deduplicated backups of local directories to a 
   - **Multiple Operation Modes**: Supports standard backups, dry runs, integrity checks, difference summaries, and a safe, interactive restore mode. 
   - **Concurrency Control & Logging**: Prevents multiple instances from running simultaneously and handles its own log rotation.
   - **Pre-run Validation**: Performs checks for required commands and repository connectivity before execution.
+  - **Cron Job Monitoring**: Optional integration with [Healthchecks.io](https://healthchecks.io) for alerts if a backup job fails to run on schedule.
 
 -----
 
@@ -29,6 +30,7 @@ This script automates encrypted, deduplicated backups of local directories to a 
   - `sudo ./restic-backup.sh --verbose` - Run with live progress and detailed output.
   - `sudo ./restic-backup.sh --dry-run` - Preview changes without creating a new snapshot.
   - `sudo ./restic-backup.sh --check` - Verify repository integrity by checking a subset of data.
+  - `sudo ./restic-backup.sh --check-full` - Run a full check verifying all repository data.
   - `sudo ./restic-backup.sh --test` - Validate configuration, permissions, and SSH connectivity.
   - `sudo ./restic-backup.sh --restore` - Start the interactive restore wizard.
   - `sudo ./restic-backup.sh --forget` - Manually apply the retention policy and prune old data.
@@ -255,6 +257,9 @@ To run the backup automatically, edit the root crontab.
  
     # Run the retention/prune job every Sunday at 4:00 AM 
     0 4 * * 0 /root/scripts/backup/restic-backup.sh --forget > /dev/null 2>&1
+
+    # Cron job for a monthly full check (e.g., first Sunday of the month at 3 AM)
+    0 3 * * 0 [ $(date +\%d) -le 07 ] && /root/scripts/backup/restic-backup.sh --check-full > /dev/null 2>&1
 
     ```
     *For pune job in your `restic-backup.conf`, set `PRUNE_AFTER_FORGET=true`.*  

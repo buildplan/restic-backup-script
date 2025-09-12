@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.26 - 2025.09.11
+#         Restic Backup Script v0.27 - 2025.09.12
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.26"
+SCRIPT_VERSION="0.27"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -75,7 +75,6 @@ import_restic_key() {
 
 check_and_install_restic() {
     echo -e "${C_BOLD}--- Checking Restic Version ---${C_RESET}"
-
     if ! command -v bzip2 &>/dev/null || ! command -v curl &>/dev/null || ! command -v gpg &>/dev/null; then
         echo -e "${C_RED}ERROR: 'bzip2', 'curl', and 'gpg' are required for secure auto-installation.${C_RESET}" >&2
         echo -e "${C_YELLOW}On Debian based systems install with: sudo apt-get install bzip2 curl gnupg${C_RESET}" >&2
@@ -217,18 +216,13 @@ if [ ! -f "$CONFIG_FILE" ]; then
     echo -e "${C_RED}ERROR: Configuration file not found: $CONFIG_FILE${C_RESET}" >&2
     exit 1
 fi
-
-# Source configuration file
 source "$CONFIG_FILE"
-
-# Validate required configuration
 REQUIRED_VARS=(
     "RESTIC_REPOSITORY"
     "RESTIC_PASSWORD_FILE"
     "BACKUP_SOURCES"
     "LOG_FILE"
 )
-
 for var in "${REQUIRED_VARS[@]}"; do
     if [ -z "${!var:-}" ]; then
         echo -e "${C_RED}ERROR: Required configuration variable '$var' is not set${C_RESET}" >&2
@@ -254,6 +248,7 @@ display_help() {
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots" "List all available snapshots in the repository."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots-delete" "Interactively select and permanently delete specific snapshots."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check" "Verify repository integrity by checking a subset of data."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check-full" "Run a FULL, slow check verifying all repository data."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Manually apply the retention policy and prune old data."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--unlock" "Forcibly remove stale locks from the repository."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--restore" "Start the interactive restore wizard."
@@ -294,11 +289,6 @@ build_backup_command() {
 run_diff() {
     echo -e "${C_BOLD}--- Generating Backup Summary ---${C_RESET}"
     log_message "Generating backup summary (diff)"
-    if ! command -v jq >/dev/null 2>&1; then
-        echo -e "${C_YELLOW}jq not found; install jq for JSON parsing (apt/dnf install jq).${C_RESET}" >&2
-        log_message "WARNING: jq not installed; cannot run JSON-based diff summary."
-        return 1
-    fi
     local path_args=()
     for p in "${BACKUP_SOURCES[@]}"; do
         path_args+=(--path "$p")
@@ -367,7 +357,6 @@ run_diff() {
 run_snapshots() {
     echo -e "${C_BOLD}--- Listing Snapshots ---${C_RESET}"
     log_message "Listing all snapshots"
-
     if ! restic snapshots; then
         log_message "ERROR: Failed to list snapshots"
         echo -e "${C_RED}❌ Failed to list snapshots. Check repository connection and credentials.${C_RESET}" >&2
@@ -378,22 +367,17 @@ run_snapshots() {
 run_unlock() {
     echo -e "${C_BOLD}--- Unlocking Repository ---${C_RESET}"
     log_message "Attempting to unlock repository"
-
     local lock_info
     lock_info=$(restic list locks --repo "$RESTIC_REPOSITORY" --password-file "$RESTIC_PASSWORD_FILE")
-
     if [ -z "$lock_info" ]; then
         echo -e "${C_GREEN}✅ No locks found. Repository is clean.${C_RESET}"
         log_message "No stale locks found."
         return 0
     fi
-
     echo -e "${C_YELLOW}Found stale locks in the repository:${C_RESET}"
     echo "$lock_info"
-
     local other_processes
     other_processes=$(ps aux | grep 'restic ' | grep -v 'grep' || true)
-
     if [ -n "$other_processes" ]; then
         echo -e "${C_YELLOW}WARNING: Another restic process appears to be running:${C_RESET}"
         echo "$other_processes"
@@ -406,7 +390,6 @@ run_unlock() {
     else
         echo -e "${C_GREEN}✅ No other active restic processes found. It is safe to proceed.${C_RESET}"
     fi
-
     echo "Attempting to remove stale locks..."
     if restic unlock --repo "$RESTIC_REPOSITORY" --password-file "$RESTIC_PASSWORD_FILE"; then
         echo -e "${C_GREEN}✅ Repository unlocked successfully.${C_RESET}"
@@ -423,11 +406,9 @@ send_ntfy() {
     local tags="$2"
     local priority="$3"
     local message="$4"
-
     if [[ "${NTFY_ENABLED:-false}" != "true" ]] || [ -z "${NTFY_TOKEN:-}" ] || [ -z "${NTFY_URL:-}" ]; then
         return 0
     fi
-
     curl -s --max-time 15 \
         -u ":$NTFY_TOKEN" \
         -H "Title: $title" \
@@ -441,11 +422,9 @@ send_discord() {
     local title="$1"
     local status="$2"
     local message="$3"
-
     if [[ "${DISCORD_ENABLED:-false}" != "true" ]] || [ -z "${DISCORD_WEBHOOK_URL:-}" ]; then
         return 0
     fi
-
     local color
     case "$status" in
         success) color=3066993 ;;
@@ -453,14 +432,11 @@ send_discord() {
         failure) color=15158332 ;;
         *) color=9807270 ;;
     esac
-
     local escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
     local escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
-
     local json_payload
     printf -v json_payload '{"embeds": [{"title": "%s", "description": "%s", "color": %d, "timestamp": "%s"}]}' \
         "$escaped_title" "$escaped_message" "$color" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
-
     curl -s --max-time 15 \
         -H "Content-Type: application/json" \
         -d "$json_payload" \
@@ -473,17 +449,13 @@ send_notification() {
     local ntfy_priority="$3"
     local discord_status="$4"
     local message="$5"
-
     send_ntfy "$title" "$tags" "$ntfy_priority" "$message"
     send_discord "$title" "$discord_status" "$message"
 }
 
 setup_environment() {
-    # Export restic environment variables
     export RESTIC_REPOSITORY
     export RESTIC_PASSWORD_FILE
-
-    # Create exclude file from patterns
     if [ -n "${EXCLUDE_PATTERNS:-}" ]; then
         EXCLUDE_TEMP_FILE=$(mktemp)
         echo "$EXCLUDE_PATTERNS" | tr ' ' '\n' > "$EXCLUDE_TEMP_FILE"
@@ -491,10 +463,7 @@ setup_environment() {
 }
 
 cleanup() {
-    # Remove temporary files
     [ -n "${EXCLUDE_TEMP_FILE:-}" ] && rm -f "$EXCLUDE_TEMP_FILE"
-
-    # Release lock
     if [ -n "${LOCK_FD:-}" ]; then
         flock -u "$LOCK_FD"
     fi
@@ -503,10 +472,10 @@ cleanup() {
 run_preflight_checks() {
     local mode="${1:-backup}"
     local verbosity="${2:-quiet}"
-
     # Helper function for failure
     handle_failure() {
         local error_message="$1"
+        local exit_code="${2:-1}"
         local notification_title="Pre-flight Check FAILED: $HOSTNAME"
         local full_error_message="ERROR: $error_message"
         log_message "$full_error_message"
@@ -514,62 +483,60 @@ run_preflight_checks() {
         echo -e "${C_RED}$full_error_message${C_RESET}" >&2
         send_notification "$notification_title" "x" \
             "${NTFY_PRIORITY_FAILURE}" "failure" "$error_message"
-        exit 1
+        exit "$exit_code"
     }
-
     if [[ "$verbosity" == "verbose" ]]; then
         echo -e "${C_BOLD}--- Running Pre-flight Checks ---${C_RESET}"
     fi
-
     # System Dependencies
     if [[ "$verbosity" == "verbose" ]]; then
         echo -e "\n  ${C_DIM}- Checking System Dependencies${C_RESET}"
-        printf "    %-65s" "Required commands (restic, curl, flock)..."
+        printf "     %-65s" "Required commands (restic, curl, flock)..."
     fi
     local required_cmds=(restic curl flock)
     for cmd in "${required_cmds[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then
-            handle_failure "Required command '$cmd' not found."
+            handle_failure "Required command '$cmd' not found." "10"
         fi
     done
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
-
-    # Configuration Files
-    if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Configuration Files${C_RESET}"; fi
-
-    if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Password file ('$RESTIC_PASSWORD_FILE')..."; fi
-    if [ ! -r "$RESTIC_PASSWORD_FILE" ]; then
-        handle_failure "Password file not found or not readable: $RESTIC_PASSWORD_FILE"
-    fi
-    if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
-
-    if [ -n "${EXCLUDE_FILE:-}" ]; then
-        if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Exclude file ('$EXCLUDE_FILE')..."; fi
-        if [ ! -r "$EXCLUDE_FILE" ]; then
-            handle_failure "The specified EXCLUDE_FILE is not readable: ${EXCLUDE_FILE}"
+    if [[ "$mode" == "diff" ]]; then
+        if [[ "$verbosity" == "verbose" ]]; then printf "     %-65s" "jq command for --diff..."; fi
+        if ! command -v jq &>/dev/null; then
+            handle_failure "'jq' is required for the --diff command. Install on Debian based system with sudo apt install jq" "10"
         fi
         if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     fi
-
-    if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Log file writability ('$LOG_FILE')..."; fi
-    if ! touch "$LOG_FILE" >/dev/null 2>&1; then
-        handle_failure "The log file or its directory is not writable: ${LOG_FILE}"
+    # Configuration Files
+    if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Configuration Files${C_RESET}"; fi
+    if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Password file ('$RESTIC_PASSWORD_FILE')..."; fi
+    if [ ! -r "$RESTIC_PASSWORD_FILE" ]; then
+        handle_failure "Password file not found or not readable: $RESTIC_PASSWORD_FILE" "11"
     fi
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
-
+    if [ -n "${EXCLUDE_FILE:-}" ]; then
+        if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Exclude file ('$EXCLUDE_FILE')..."; fi
+        if [ ! -r "$EXCLUDE_FILE" ]; then
+            handle_failure "The specified EXCLUDE_FILE is not readable: ${EXCLUDE_FILE}" "14"
+        fi
+        if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
+    fi
+    if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Log file writability ('$LOG_FILE')..."; fi
+    if ! touch "$LOG_FILE" >/dev/null 2>&1; then
+        handle_failure "The log file or its directory is not writable: ${LOG_FILE}" "15"
+    fi
+    if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     # Repository State
     if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Repository State${C_RESET}"; fi
-
     if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Repository connectivity and credentials..."; fi
     if ! restic cat config >/dev/null 2>&1; then
         if [[ "$mode" == "init" ]]; then
             if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_YELLOW} SKIP ${C_RESET}] (OK for --init mode)"; fi
             return 0
         fi
-        handle_failure "Cannot access repository. Check credentials or run --init first."
+        handle_failure "Cannot access repository. Check credentials or run --init first." "12"
     fi
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
-
     if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Stale repository locks..."; fi
     local lock_info
     lock_info=$(restic list locks 2>/dev/null || true)
@@ -582,7 +549,6 @@ run_preflight_checks() {
     else
         if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     fi
-
     # Backup Sources
     if [[ "$mode" == "backup" || "$mode" == "diff" ]]; then
         if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Backup Sources${C_RESET}"; fi
@@ -592,12 +558,11 @@ run_preflight_checks() {
         for source in "${BACKUP_SOURCES[@]}"; do
             if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Source directory ('$source')..."; fi
             if [ ! -d "$source" ] || [ ! -r "$source" ]; then
-                handle_failure "Source directory not found or not readable: $source"
+                handle_failure "Source directory not found or not readable: $source" "13"
             fi
             if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
         done
     fi
-
     if [[ "$verbosity" == "quiet" ]]; then
         echo -e "${C_GREEN}✅ Pre-flight checks passed.${C_RESET}"
     fi
@@ -607,21 +572,16 @@ rotate_log() {
     if [ ! -f "$LOG_FILE" ]; then
         return 0
     fi
-
     local max_size_bytes=$(( ${MAX_LOG_SIZE_MB:-10} * 1024 * 1024 ))
     local log_size
-
     if command -v stat >/dev/null 2>&1; then
         log_size=$(stat -f%z "$LOG_FILE" 2>/dev/null || stat -c%s "$LOG_FILE" 2>/dev/null || echo 0)
     else
         log_size=0
     fi
-
     if [ "$log_size" -gt "$max_size_bytes" ]; then
         mv "$LOG_FILE" "${LOG_FILE}.$(date +%Y%m%d_%H%M%S)"
         touch "$LOG_FILE"
-
-        # Clean old rotated logs
         find "$(dirname "$LOG_FILE")" -name "$(basename "$LOG_FILE").*" \
             -type f -mtime +"${LOG_RETENTION_DAYS:-30}" -delete 2>/dev/null || true
     fi
@@ -629,14 +589,11 @@ rotate_log() {
 
 run_with_priority() {
     local cmd=("$@")
-
     if [ "${LOW_PRIORITY:-true}" = "true" ]; then
         local priority_cmd=(nice -n "${NICE_LEVEL:-19}")
-
         if command -v ionice >/dev/null 2>&1; then
             priority_cmd+=(ionice -c "${IONICE_CLASS:-3}")
         fi
-
         priority_cmd+=("${cmd[@]}")
         "${priority_cmd[@]}"
     else
@@ -650,14 +607,11 @@ run_with_priority() {
 
 init_repository() {
     echo -e "${C_BOLD}--- Initializing Repository ---${C_RESET}"
-
     if restic cat config >/dev/null 2>&1; then
         echo -e "${C_YELLOW}Repository already exists${C_RESET}"
         return 0
     fi
-
     log_message "Initializing new repository: $RESTIC_REPOSITORY"
-
     if restic init; then
         log_message "Repository initialized successfully"
         echo -e "${C_GREEN}✅ Repository initialized${C_RESET}"
@@ -674,24 +628,17 @@ init_repository() {
 
 run_backup() {
     local start_time=$(date +%s)
-
     echo -e "${C_BOLD}--- Starting Backup ---${C_RESET}"
     log_message "Starting backup of: ${BACKUP_SOURCES[*]}"
-
     local backup_cmd=()
     mapfile -t backup_cmd < <(build_backup_command)
-
     local backup_log=$(mktemp)
     local backup_success=false
-
     if run_with_priority "${backup_cmd[@]}" 2>&1 | tee "$backup_log"; then
         backup_success=true
     fi
-
-    # Parse backup results
     local files_new files_changed files_unmodified
     local data_added data_processed
-
     if grep -q "Files:" "$backup_log"; then
         files_new=$(grep "Files:" "$backup_log" | tail -1 | awk '{print $2}')
         files_changed=$(grep "Files:" "$backup_log" | tail -1 | awk '{print $4}')
@@ -699,17 +646,13 @@ run_backup() {
         data_added=$(grep "Added to the repository:" "$backup_log" | tail -1 | awk '{print $5" "$6}')
         data_processed=$(grep "processed" "$backup_log" | tail -1 | awk '{print $1" "$2}')
     fi
-
     cat "$backup_log" >> "$LOG_FILE"
     rm -f "$backup_log"
-
     local end_time=$(date +%s)
     local duration=$((end_time - start_time))
-
     if [ "$backup_success" = true ]; then
         log_message "Backup completed successfully"
         echo -e "${C_GREEN}✅ Backup completed${C_RESET}"
-
         local stats_msg
         printf -v stats_msg "Files: %s new, %s changed, %s unmodified\nData added: %s\nDuration: %dm %ds" \
             "${files_new:-0}" \
@@ -718,7 +661,6 @@ run_backup() {
             "${data_added:-Not applicable}" \
             "$((duration / 60))" \
             "$((duration % 60))"
-
         send_notification "Backup SUCCESS: $HOSTNAME" "white_check_mark" \
             "${NTFY_PRIORITY_SUCCESS}" "success" "$stats_msg"
     else
@@ -733,7 +675,6 @@ run_backup() {
 run_forget() {
     echo -e "${C_BOLD}--- Cleaning Old Snapshots ---${C_RESET}"
     log_message "Running retention policy"
-
     local forget_cmd=(restic forget)
     [ -n "${KEEP_LAST:-}" ] && forget_cmd+=(--keep-last "$KEEP_LAST")
     [ -n "${KEEP_DAILY:-}" ] && forget_cmd+=(--keep-daily "$KEEP_DAILY")
@@ -741,7 +682,6 @@ run_forget() {
     [ -n "${KEEP_MONTHLY:-}" ] && forget_cmd+=(--keep-monthly "$KEEP_MONTHLY")
     [ -n "${KEEP_YEARLY:-}" ] && forget_cmd+=(--keep-yearly "$KEEP_YEARLY")
     [ "${PRUNE_AFTER_FORGET:-true}" = "true" ] && forget_cmd+=(--prune)
-
     if run_with_priority "${forget_cmd[@]}" 2>&1 | tee -a "$LOG_FILE"; then
         log_message "Retention policy applied successfully"
         echo -e "${C_GREEN}✅ Old snapshots cleaned${C_RESET}"
@@ -756,7 +696,6 @@ run_forget() {
 run_check() {
     echo -e "${C_BOLD}--- Checking Repository Integrity ---${C_RESET}"
     log_message "Running integrity check"
-
     if restic check --read-data-subset=5% 2>&1 | tee -a "$LOG_FILE"; then
         log_message "Integrity check passed"
         echo -e "${C_GREEN}✅ Repository integrity OK${C_RESET}"
@@ -768,37 +707,42 @@ run_check() {
     fi
 }
 
+run_check_full() {
+    echo -e "${C_BOLD}--- Checking Repository Integrity (Full Data Scan) ---${C_RESET}"
+    echo -e "${C_YELLOW}⚠️  This will read ALL data and may be slow and consume significant bandwidth.${C_RESET}"
+    log_message "Running FULL integrity check (--read-data)"
+    if restic check --read-data 2>&1 | tee -a "$LOG_FILE"; then
+        log_message "Full integrity check passed"
+        echo -e "${C_GREEN}✅ Repository integrity OK (Full data scan complete).${C_RESET}"
+    else
+        log_message "CRITICAL: Full integrity check FAILED"
+        echo -e "${C_RED}❌ CRITICAL: Full integrity check FAILED.${C_RESET}" >&2
+        send_notification "Repository Check FAILED: $HOSTNAME" "x" \
+            "${NTFY_PRIORITY_FAILURE}" "failure" "CRITICAL: A full repository integrity check (--read-data) has failed!"
+    fi
+}
+
 run_restore() {
     echo -e "${C_BOLD}--- Restore Mode ---${C_RESET}"
-
-    # List available snapshots
     echo "Available snapshots:"
     restic snapshots --compact
     echo
-
-    # Get snapshot ID
     read -p "Enter snapshot ID to restore (or 'latest'): " snapshot_id
     if [ -z "$snapshot_id" ]; then
         echo "No snapshot specified, exiting"
         return 1
     fi
-
-    # Offer to list snapshot contents
     local list_confirm
     read -p "Would you like to list the contents of this snapshot to find exact paths? (y/n): " list_confirm
     if [[ "${list_confirm,,}" == "y" || "${list_confirm,,}" == "yes" ]]; then
         echo -e "${C_DIM}Displaying snapshot contents (use arrow keys to scroll, 'q' to quit)...${C_RESET}"
         less -f <(restic ls -l "$snapshot_id")
     fi
-
-    # Get restore destination
     read -p "Enter restore destination (absolute path): " restore_dest
     if [[ -z "$restore_dest" || "$restore_dest" != /* ]]; then
         echo -e "${C_RED}Error: Must be a non-empty, absolute path. Aborting.${C_RESET}" >&2
         return 1
     fi
-
-    # Ask for specific paths to include
     local include_paths=()
     read -p "Optional: Enter specific file(s) to restore, separated by spaces (leave blank for full restore): " -a include_paths
     local restic_cmd=(restic restore "$snapshot_id" --target "$restore_dest" --verbose)
@@ -808,39 +752,28 @@ run_restore() {
         done
         echo -e "${C_YELLOW}Will restore only the specified paths...${C_RESET}"
     fi
-
-    # Perform a dry run for user confirmation
     echo -e "${C_BOLD}\n--- Performing Dry Run (No changes will be made) ---${C_RESET}"
     if ! "${restic_cmd[@]}" --dry-run; then
         echo -e "${C_RED}❌ Dry run failed. Aborting restore.${C_RESET}" >&2
         return 1
     fi
     echo -e "${C_BOLD}--- Dry Run Complete ---${C_RESET}"
-
-    # Ask for final confirmation
     local proceed_confirm
     read -p "Proceed with the actual restore? (y/n): " proceed_confirm
     if [[ "${proceed_confirm,,}" != "y" && "${proceed_confirm,,}" != "yes" ]]; then
         echo "Restore cancelled by user."
         return 0
     fi
-
-    # Create destination if it doesn't exist and perform the restore
     mkdir -p "$restore_dest"
     echo -e "${C_BOLD}--- Performing Restore ---${C_RESET}"
     log_message "Restoring snapshot $snapshot_id to $restore_dest"
-
-    #  Restore Logic
     local restore_log
     restore_log=$(mktemp)
     local restore_success=false
-
     if "${restic_cmd[@]}" 2>&1 | tee "$restore_log"; then
         restore_success=true
     fi
     cat "$restore_log" >> "$LOG_FILE"
-
-    # Handle failure of the restic command
     if [ "$restore_success" = false ]; then
         log_message "ERROR: Restore failed"
         echo -e "${C_RED}❌ Restore failed${C_RESET}" >&2
@@ -849,8 +782,6 @@ run_restore() {
         rm -f "$restore_log"
         return 1
     fi
-
-    # Check if the restore was successful
     if grep -q "Summary: Restored 0 files/dirs" "$restore_log"; then
         echo -e "\n${C_YELLOW}⚠️  Restore completed, but no files were restored.${C_RESET}"
         echo -e "${C_YELLOW}This usually means the specific path(s) you provided do not exist in this snapshot.${C_RESET}"
@@ -880,8 +811,6 @@ run_restore() {
         send_notification "Restore SUCCESS: $HOSTNAME" "white_check_mark" \
             "${NTFY_PRIORITY_SUCCESS}" "success" "Restored $snapshot_id to $restore_dest"
     fi
-
-    # Clean up the temporary log file
     rm -f "$restore_log"
 }
 
@@ -889,25 +818,18 @@ run_snapshots_delete() {
     echo -e "${C_BOLD}--- Interactively Delete Snapshots ---${C_RESET}"
     echo -e "${C_BOLD}${C_RED}WARNING: This operation is permanent and cannot be undone.${C_RESET}"
     echo
-
-    # List available snapshots for the user
     echo "Available snapshots:"
     if ! restic snapshots --compact; then
         echo -e "${C_RED}❌ Could not list snapshots. Aborting.${C_RESET}" >&2
         return 1
     fi
     echo
-
-    # Prompt user for snapshot IDs
     local -a ids_to_delete
     read -p "Enter snapshot ID(s) to delete, separated by spaces: " -a ids_to_delete
-
     if [ ${#ids_to_delete[@]} -eq 0 ]; then
         echo "No snapshot IDs entered. Aborting."
         return 1
     fi
-
-    # Final confirmation
     echo -e "\nYou have selected the following ${C_YELLOW}${#ids_to_delete[@]} snapshot(s)${C_RESET} for deletion:"
     for id in "${ids_to_delete[@]}"; do
         echo "  - $id"
@@ -919,8 +841,6 @@ run_snapshots_delete() {
         echo "Confirmation not received. Aborting deletion."
         return 0
     fi
-
-    # Execute the forget command
     echo -e "${C_BOLD}--- Deleting Snapshots ---${C_RESET}"
     log_message "User initiated deletion of snapshots: ${ids_to_delete[*]}"
 
@@ -932,8 +852,6 @@ run_snapshots_delete() {
         echo -e "${C_RED}❌ Failed to delete snapshots.${C_RESET}" >&2
         return 1
     fi
-
-    # Offer to run prune
     read -p "Would you like to run 'prune' now to reclaim disk space? (y/n): " prune_confirm
     if [[ "${prune_confirm,,}" == "y" || "${prune_confirm,,}" == "yes" ]]; then
         echo -e "${C_BOLD}--- Pruning Repository ---${C_RESET}"
@@ -954,32 +872,21 @@ run_snapshots_delete() {
 # MAIN SCRIPT EXECUTION
 # =================================================================
 
-# Check for script updates (interactive mode only)
 check_for_script_update
-
-# Check for Restic and update if necessary
 check_and_install_restic
-
-# Set up signal handlers
 trap cleanup EXIT
-trap 'send_notification "Backup Crashed: $HOSTNAME" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly"' ERR
-
-# Parse command line arguments
+trap 'log_message "FATAL: Script terminated unexpectedly on line $LINENO. Sending crash notification."; send_notification "Backup Crashed: $HOSTNAME" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly on line $LINENO."' ERR
 VERBOSE_MODE=false
 if [[ "${1:-}" == "--verbose" ]]; then
     VERBOSE_MODE=true
     shift
 fi
-
-# Acquire lock
 exec 200>"$LOCK_FILE"
 if ! flock -n 200; then
     echo -e "${C_RED}Another backup is already running${C_RESET}" >&2
     exit 5
 fi
 LOCK_FD=200
-
-# Set up environment
 setup_environment
 rotate_log
 
@@ -1014,6 +921,10 @@ case "${1:-}" in
         run_preflight_checks "backup" "quiet"
         run_check
         ;;
+    --check-full)
+        run_preflight_checks "backup" "quiet"
+        run_check_full
+        ;;
     --forget)
         run_preflight_checks "backup" "quiet"
         run_forget
@@ -1039,22 +950,21 @@ case "${1:-}" in
             display_help
             exit 1
         fi
-
-        # Default: full backup
         run_preflight_checks "backup" "quiet"
-
         log_message "=== Starting backup run ==="
-
         if run_backup; then
-            # Only run forget/check if backup was successful
             run_forget
-
             if [ "${CHECK_AFTER_BACKUP:-false}" = "true" ]; then
                 run_check
             fi
         fi
-
         log_message "=== Backup run completed ==="
+
+        # --- Ping Healthchecks.io on success ---
+        if [[ -n "${HEALTHCHECKS_URL:-}" ]]; then
+            log_message "Pinging Healthchecks.io to signal successful run."
+            curl -fsS -m 15 --retry 3 "${HEALTHCHECKS_URL}" >/dev/null 2>>"$LOG_FILE"
+        fi
         ;;
 esac
 
