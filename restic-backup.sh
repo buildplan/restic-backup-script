@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.26 - 2025.09.11
+#         Restic Backup Script v0.27 - 2025.09.12
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.26"
+SCRIPT_VERSION="0.27"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -294,11 +294,6 @@ build_backup_command() {
 run_diff() {
     echo -e "${C_BOLD}--- Generating Backup Summary ---${C_RESET}"
     log_message "Generating backup summary (diff)"
-    if ! command -v jq >/dev/null 2>&1; then
-        echo -e "${C_YELLOW}jq not found; install jq for JSON parsing (apt/dnf install jq).${C_RESET}" >&2
-        log_message "WARNING: jq not installed; cannot run JSON-based diff summary."
-        return 1
-    fi
     local path_args=()
     for p in "${BACKUP_SOURCES[@]}"; do
         path_args+=(--path "$p")
@@ -524,7 +519,7 @@ run_preflight_checks() {
     # System Dependencies
     if [[ "$verbosity" == "verbose" ]]; then
         echo -e "\n  ${C_DIM}- Checking System Dependencies${C_RESET}"
-        printf "    %-65s" "Required commands (restic, curl, flock)..."
+        printf "     %-65s" "Required commands (restic, curl, flock)..."
     fi
     local required_cmds=(restic curl flock)
     for cmd in "${required_cmds[@]}"; do
@@ -533,6 +528,13 @@ run_preflight_checks() {
         fi
     done
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
+    if [[ "$mode" == "diff" ]]; then
+        if [[ "$verbosity" == "verbose" ]]; then printf "     %-65s" "jq command for --diff..."; fi
+        if ! command -v jq &>/dev/null; then
+            handle_failure "'jq' is required for the --diff command. Install on Debian based system with sudo apt install jq"
+        fi
+        if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
+    fi
 
     # Configuration Files
     if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Configuration Files${C_RESET}"; fi
