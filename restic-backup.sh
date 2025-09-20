@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.27 - 2025.09.12
+#         Restic Backup Script v0.28 - 2025.09.20
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.27"
+SCRIPT_VERSION="0.28"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -247,6 +247,7 @@ display_help() {
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--diff" "Show a summary of changes between the last two snapshots."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots" "List all available snapshots in the repository."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots-delete" "Interactively select and permanently delete specific snapshots."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--stats" "Display repository size, file counts, and stats."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check" "Verify repository integrity by checking a subset of data."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check-full" "Run a FULL, slow check verifying all repository data."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Manually apply the retention policy and prune old data."
@@ -626,6 +627,19 @@ init_repository() {
     fi
 }
 
+run_stats() {
+    echo -e "${C_BOLD}--- Displaying Repository Statistics ---${C_RESET}"
+    log_message "Displaying repository statistics"
+    if restic stats 2>&1 | tee -a "$LOG_FILE"; then
+        log_message "Successfully displayed repository stats"
+        echo -e "${C_GREEN}✅ Statistics displayed successfully.${C_RESET}"
+    else
+        log_message "ERROR: Failed to retrieve repository statistics"
+        echo -e "${C_RED}❌ Failed to retrieve repository statistics. Check connection and credentials.${C_RESET}" >&2
+        return 1
+    fi
+}
+
 run_backup() {
     local start_time=$(date +%s)
     echo -e "${C_BOLD}--- Starting Backup ---${C_RESET}"
@@ -936,6 +950,10 @@ case "${1:-}" in
     --snapshots-delete)
         run_preflight_checks "backup" "quiet"
         run_snapshots_delete
+        ;;
+    --stats)
+        run_preflight_checks "backup" "quiet"
+        run_stats
         ;;
     --unlock)
         run_preflight_checks "unlock" "quiet"
