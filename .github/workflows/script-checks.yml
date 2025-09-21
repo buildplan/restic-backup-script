@@ -7,7 +7,6 @@ on:
       - 'improve**'
     paths:
       - '**/*.sh'
-  workflow_dispatch:
   pull_request:
     branches:
       - main
