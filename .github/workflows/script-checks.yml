@@ -32,3 +32,12 @@ jobs:
           scandir: './restic-backup.sh'
         env:
           SHELLCHECK_OPTS: -s bash
+
+
+  shfmt:
+    name: Shell Fomatting
+    runs-on: ubuntu-latest
+    needs: shellcheck
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
