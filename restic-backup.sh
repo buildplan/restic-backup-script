@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.28 - 2025.09.20
+#         Restic Backup Script v0.29 - 2025.09.21
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.28"
+SCRIPT_VERSION="0.29"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -628,14 +628,26 @@ init_repository() {
 }
 
 run_stats() {
+    local exit_code=0
     echo -e "${C_BOLD}--- Displaying Repository Statistics ---${C_RESET}"
-    log_message "Displaying repository statistics"
-    if restic stats 2>&1 | tee -a "$LOG_FILE"; then
-        log_message "Successfully displayed repository stats"
-        echo -e "${C_GREEN}✅ Statistics displayed successfully.${C_RESET}"
+    echo -e "\n${C_CYAN}1. Logical Size (Total size of all unique files across all backups):${C_RESET}"
+    log_message "Getting repository stats (restore-size)"
+    if ! restic stats --mode restore-size; then
+        log_message "ERROR: Failed to get restore-size stats"
+        echo -e "${C_RED}❌ Failed to get restore-size stats.${C_RESET}" >&2
+        exit_code=1
+    fi
+    echo -e "\n${C_CYAN}2. Physical Size (Actual space used on storage):${C_RESET}"
+    log_message "Getting repository stats (raw-data)"
+    if ! restic stats --mode raw-data; then
+        log_message "ERROR: Failed to get raw-data stats"
+        echo -e "${C_RED}❌ Failed to get raw-data stats.${C_RESET}" >&2
+        exit_code=1
+    fi
+    if [ "$exit_code" -eq 0 ]; then
+        echo -e "\n${C_GREEN}✅ Statistics displayed successfully.${C_RESET}"
+        return 0
     else
-        log_message "ERROR: Failed to retrieve repository statistics"
-        echo -e "${C_RED}❌ Failed to retrieve repository statistics. Check connection and credentials.${C_RESET}" >&2
         return 1
     fi
 }
