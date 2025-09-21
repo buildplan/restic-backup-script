@@ -6,7 +6,8 @@ on:
       - main
       - 'improve**'
     paths:
-      - 'restic-backup.sh'
+      - '**/*.sh'
+  workflow_dispatch:
   pull_request:
     branches:
       - main
