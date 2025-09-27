@@ -1246,3 +1246,4 @@ case "${1:-}" in
         ;;
 esac
 
+echo -e "${C_BOLD}--- Backup Script Completed ---${C_RESET}"
