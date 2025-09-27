@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.30 - 2025.09.26
+#         Restic Backup Script v0.31 - 2025.09.27
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.30"
+SCRIPT_VERSION="0.31"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -255,6 +255,8 @@ display_help() {
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--restore" "Start the interactive restore wizard."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dry-run" "Preview backup changes without creating a new snapshot."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--test" "Validate configuration, permissions, and SSH connectivity."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--install-scheduler" "Install an automated backup schedule (systemd/cron)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--uninstall-scheduler" "Remove an existing automated backup schedule."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--help, -h" "Display this help message."
     echo
     echo -e "Use ${C_GREEN}--verbose${C_RESET} before any command for detailed live output (e.g., 'sudo $0 --verbose --diff')."
@@ -580,7 +582,7 @@ rotate_log() {
     local max_size_bytes=$(( ${MAX_LOG_SIZE_MB:-10} * 1024 * 1024 ))
     local log_size
     if command -v stat >/dev/null 2>&1; then
-        log_size=$(stat -f%z "$LOG_FILE" 2>/dev/null || stat -c%s "$LOG_FILE" 2>/dev/null || echo 0)
+        log_size=$(stat -f%z "$LOG_FILE" 2>/dev/null || stat -c%s "$LOG_FILE" 2>/dev/null || wc -c < "$LOG_FILE" 2>/dev/null || echo 0)
     else
         log_size=0
     fi
@@ -603,6 +605,238 @@ run_with_priority() {
         "${priority_cmd[@]}"
     else
         "${cmd[@]}"
+    fi
+}
+
+run_install_scheduler() {
+    echo -e "${C_BOLD}--- Backup Schedule Installation Wizard ---${C_RESET}"
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${C_RED}ERROR: This operation requires root privileges.${C_RESET}" >&2
+        exit 1
+    fi
+    local script_path
+    script_path=$(realpath "$0")
+    echo -e "\n${C_YELLOW}Which scheduling system would you like to use?${C_RESET}"
+    echo "  1) ${C_GREEN}systemd timer${C_RESET} (Modern, recommended, more flexible logging)"
+    echo "  2) ${C_CYAN}crontab${C_RESET}       (Classic, simple, universally available)"
+    local scheduler_choice
+    read -p "Enter your choice [1]: " scheduler_choice
+    scheduler_choice=${scheduler_choice:-1}
+    echo -e "\n${C_YELLOW}How often would you like the backup to run?${C_RESET}"
+    echo "  1) ${C_GREEN}Once daily${C_RESET}"
+    echo "  2) ${C_GREEN}Twice daily${C_RESET} (e.g., every 12 hours)"
+    echo "  3) ${C_CYAN}Custom schedule${C_RESET} (provide your own expression)"
+    local schedule_choice
+    read -p "Enter your choice [1]: " schedule_choice
+    schedule_choice=${schedule_choice:-1}
+
+    local systemd_schedule cron_schedule
+    case "$schedule_choice" in
+        1)
+            local daily_time
+            while true; do
+                read -p "Enter the time to run the backup (24-hour HH:MM format) [03:00]: " daily_time
+                daily_time=${daily_time:-03:00}
+                if [[ "$daily_time" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then break; else echo -e "${C_RED}Invalid format. Please use HH:MM.${C_RESET}"; fi
+            done
+            local hour=${daily_time%%:*} minute=${daily_time##*:}
+            systemd_schedule="*-*-* ${hour}:${minute}:00"
+            cron_schedule="${minute} ${hour} * * *"
+            ;;
+        2)
+            local time1 time2
+            while true; do
+                read -p "Enter the first time (24-hour HH:MM format) [03:00]: " time1
+                time1=${time1:-03:00}
+                if [[ "$time1" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then break; else echo -e "${C_RED}Invalid format. Please use HH:MM.${C_RESET}"; fi
+            done
+            while true; do
+                read -p "Enter the second time (24-hour HH:MM format) [15:30]: " time2
+                time2=${time2:-15:30}
+                if [[ "$time2" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then break; else echo -e "${C_RED}Invalid format. Please use HH:MM.${C_RESET}"; fi
+            done
+            local hour1=${time1%%:*} min1=${time1##*:}
+            local hour2=${time2%%:*} min2=${time2##*:}
+            systemd_schedule="*-*-* ${hour1}:${min1}:00,${hour2}:${min2}:00"
+            cron_schedule="${min1} ${hour1} * * *\n${min2} ${hour2} * * *"
+            ;;
+        3)
+            if [[ "$scheduler_choice" == "1" ]]; then
+                read -p "Enter a custom systemd 'OnCalendar' expression: " systemd_schedule
+                if command -v systemd-analyze >/dev/null && ! systemd-analyze calendar "$systemd_schedule" --iterations=1 >/dev/null 2>&1; then
+                    echo -e "${C_RED}Warning: '$systemd_schedule' may be an invalid expression.${C_RESET}"
+                fi
+            else
+                while true; do
+                    read -p "Enter a custom cron expression (e.g., '0 4 * * *'): " cron_schedule
+                    if echo "$cron_schedule" | grep -qE '^([0-9*,/-]+\s){4}[0-9*,/-]+$'; then
+                        break
+                    else
+                        echo -e "${C_RED}Invalid format. A cron expression must have 5 fields separated by spaces, using only valid characters (0-9,*,/,-).${C_RESET}"
+                    fi
+                done
+            fi
+            ;;
+        *)
+            echo -e "${C_RED}Invalid choice. Aborting.${C_RESET}" >&2; return 1 ;;
+    esac
+    echo -e "\n${C_BOLD}--- Summary ---${C_RESET}"
+    echo -e "  ${C_DIM}Script Path:${C_RESET} $script_path"
+    echo -e "  ${C_DIM}Config File:${C_RESET} $CONFIG_FILE"
+    if [[ "$scheduler_choice" == "1" ]]; then
+        echo -e "  ${C_DIM}Scheduler:${C_RESET}   systemd timer"
+        echo -e "  ${C_DIM}Schedule:${C_RESET}    $systemd_schedule"
+        echo
+        read -p "Proceed with installation? (y/n): " confirm
+        if [[ "${confirm,,}" != "y" ]]; then echo "Aborted."; return 1; fi
+        install_systemd_timer "$script_path" "$systemd_schedule" "$CONFIG_FILE"
+    else
+        echo -e "  ${C_DIM}Scheduler:${C_RESET}   crontab"
+        printf "  ${C_DIM}Schedule:%b\n%s${C_RESET}\n" "${C_RESET}" "$cron_schedule"
+        echo
+        read -p "Proceed with installation? (y/n): " confirm
+        if [[ "${confirm,,}" != "y" ]]; then echo "Aborted."; return 1; fi
+        install_crontab "$script_path" "$cron_schedule" "$LOG_FILE"
+    fi
+}
+
+install_systemd_timer() {
+    local script_path="$1"
+    local schedule="$2"
+    local config_file="$3"
+    local service_file="/etc/systemd/system/restic-backup.service"
+    local timer_file="/etc/systemd/system/restic-backup.timer"
+
+    if [ -f "$service_file" ] || [ -f "$timer_file" ]; then
+        read -p "Existing systemd files found. Overwrite? (y/n): " confirm
+        if [[ "${confirm,,}" != "y" ]]; then echo "Aborted."; return 1; fi
+    fi
+    echo "Creating systemd service file: $service_file"
+    cat > "$service_file" << EOF
+[Unit]
+Description=Restic Backup Service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=$config_file
+ExecStart=$script_path
+User=root
+Group=root
+EOF
+
+    echo "Creating systemd timer file: $timer_file"
+    cat > "$timer_file" << EOF
+[Unit]
+Description=Run Restic Backup on a schedule
+
+[Timer]
+OnCalendar=$schedule
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    echo "Reloading systemd daemon, enabling and starting timer..."
+    if systemctl daemon-reload && systemctl enable --now restic-backup.timer; then
+        echo -e "${C_GREEN}✅ systemd timer installed and activated successfully.${C_RESET}"
+        echo -e "\n${C_BOLD}--- Verifying Status ---${C_RESET}"
+        systemctl status restic-backup.timer --no-pager
+    else
+        echo -e "${C_RED}❌ Failed to install or start systemd timer.${C_RESET}" >&2
+        return 1
+    fi
+}
+
+install_crontab() {
+    local script_path="$1"
+    local schedule="$2"
+    local log_file="$3"
+    local cron_file="/etc/cron.d/restic-backup"
+
+    # --- Path 1: File exists (Append mode) ---
+    if [ -f "$cron_file" ]; then
+        echo -e "${C_YELLOW}Existing cron file found at $cron_file:${C_RESET}"
+        cat "$cron_file"
+        echo
+        read -p "Add new schedule(s) to this file? (y/n): " confirm
+        if [[ "${confirm,,}" != "y" ]]; then
+            echo "Aborted."
+            return 1
+        fi
+
+        echo "Appending new schedule(s)..."
+        local new_jobs_added=0
+        # Loop to append ONLY the new job lines, checking for duplicates
+        while IFS= read -r schedule_line; do
+            if [ -n "$schedule_line" ]; then
+                local full_command_line="$schedule_line root $script_path"
+                if grep -qF "$full_command_line" "$cron_file"; then
+                    echo -e "${C_DIM}Skipping duplicate schedule: $schedule_line${C_RESET}"
+                else
+                    echo "$full_command_line >> \"$log_file\" 2>&1" >> "$cron_file"
+                    ((new_jobs_added++))
+                fi
+            fi
+        done <<< "$schedule"
+
+        if [ "$new_jobs_added" -eq 0 ]; then
+            echo -e "${C_YELLOW}No new unique schedules were added.${C_RESET}"
+        fi
+    else
+        echo "Creating new cron job file: $cron_file"
+        cat > "$cron_file" << EOF
+# Restic Backup Job installed by restic-backup.sh
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+EOF
+
+        while IFS= read -r schedule_line; do
+            if [ -n "$schedule_line" ]; then
+                echo "$schedule_line root $script_path >> \"$log_file\" 2>&1" >> "$cron_file"
+            fi
+        done <<< "$schedule"
+    fi
+
+    chmod 644 "$cron_file"
+    echo -e "${C_GREEN}✅ Cron job file updated successfully.${C_RESET}"
+    echo -e "\n${C_BOLD}--- Current Cron File Content ---${C_RESET}"
+    cat "$cron_file"
+}
+
+run_uninstall_scheduler() {
+    echo -e "${C_BOLD}--- Backup Schedule Uninstallation ---${C_RESET}"
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${C_RED}ERROR: This operation requires root privileges.${C_RESET}" >&2
+        exit 1
+    fi
+    local service_file="/etc/systemd/system/restic-backup.service"
+    local timer_file="/etc/systemd/system/restic-backup.timer"
+    local cron_file="/etc/cron.d/restic-backup"
+    local found=false
+
+    if [ -f "$timer_file" ]; then
+        found=true
+        echo "Found systemd timer. Stopping and disabling..."
+        systemctl stop restic-backup.timer
+        systemctl disable restic-backup.timer
+        rm -f "$timer_file" "$service_file"
+        systemctl daemon-reload
+        echo -e "${C_GREEN}✅ systemd timer and service files removed.${C_RESET}"
+    fi
+
+    if [ -f "$cron_file" ]; then
+        found=true
+        echo "Found cron file. Removing..."
+        rm -f "$cron_file"
+        echo -e "${C_GREEN}✅ Cron file removed.${C_RESET}"
+    fi
+
+    if [ "$found" = false ]; then
+        echo -e "${C_YELLOW}No scheduled backup tasks found to uninstall.${C_RESET}"
     fi
 }
 
@@ -826,7 +1060,7 @@ run_restore() {
         # Set file ownership logic
         if [[ "$restore_dest" == /home/* ]]; then
             local dest_user
-            dest_user=$(echo "$restore_dest" | cut -d/ -f3)
+            dest_user=$(stat -c %U "$(dirname "$restore_dest")")
             if [[ -n "$dest_user" ]] && id -u "$dest_user" &>/dev/null; then
                 echo -e "${C_CYAN}ℹ️  Home directory detected. Setting ownership of restored files to '$dest_user'...${C_RESET}"
                 if chown -R "${dest_user}:${dest_user}" "$restore_dest"; then
@@ -922,6 +1156,12 @@ rotate_log
 
 # Handle different modes
 case "${1:-}" in
+    --install-scheduler)
+        run_install_scheduler
+        ;;
+    --uninstall-scheduler)
+        run_uninstall_scheduler
+        ;;
     --init)
         run_preflight_checks "init" "quiet"
         init_repository
@@ -997,9 +1237,12 @@ case "${1:-}" in
         # --- Ping Healthchecks.io on success ---
         if [[ -n "${HEALTHCHECKS_URL:-}" ]]; then
             log_message "Pinging Healthchecks.io to signal successful run."
-            curl -fsS -m 15 --retry 3 "${HEALTHCHECKS_URL}" >/dev/null 2>>"$LOG_FILE"
+            if ! curl -fsS -m 15 --retry 3 "${HEALTHCHECKS_URL}" >/dev/null 2>>"$LOG_FILE"; then
+                log_message "WARNING: Healthchecks.io ping failed."
+                send_notification "Healthchecks Ping Failed: $HOSTNAME" "warning" \
+                    "${NTFY_PRIORITY_WARNING}" "warning" "Failed to ping Healthchecks.io after successful backup."
+            fi
         fi
         ;;
 esac
 
-echo -e "${C_BOLD}--- Backup Script Completed ---${C_RESET}"
