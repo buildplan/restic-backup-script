@@ -1060,7 +1060,7 @@ run_restore() {
         # Set file ownership logic
         if [[ "$restore_dest" == /home/* ]]; then
             local dest_user
-            dest_user=$(stat -c %U "$(dirname "$restore_dest")")
+            dest_user=$(stat -c %U "$(dirname "$restore_dest")" 2>/dev/null || echo "${restore_dest#/home/}" | cut -d/ -f1)
             if [[ -n "$dest_user" ]] && id -u "$dest_user" &>/dev/null; then
                 echo -e "${C_CYAN}ℹ️  Home directory detected. Setting ownership of restored files to '$dest_user'...${C_RESET}"
                 if chown -R "${dest_user}:${dest_user}" "$restore_dest"; then
