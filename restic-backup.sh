@@ -657,7 +657,7 @@ run_install_scheduler() {
             done
             local hour1=${time1%%:*} min1=${time1##*:}
             local hour2=${time2%%:*} min2=${time2##*:}
-            systemd_schedule="*-*-* ${hour1}:${min1}:00,${hour2}:${min2}:00"
+            systemd_schedule="*-*-* ${hour1}:${min1}:00\n*-*-* ${hour2}:${min2}:00"
             cron_schedule="${min1} ${hour1} * * *\n${min2} ${hour2} * * *"
             ;;
         3)
@@ -685,7 +685,7 @@ run_install_scheduler() {
     echo -e "  ${C_DIM}Config File:${C_RESET} $CONFIG_FILE"
     if [[ "$scheduler_choice" == "1" ]]; then
         echo -e "  ${C_DIM}Scheduler:${C_RESET}   systemd timer"
-        echo -e "  ${C_DIM}Schedule:${C_RESET}    $systemd_schedule"
+        printf "  ${C_DIM}Schedule:%b\n%s${C_RESET}\n" "${C_RESET}" "$systemd_schedule"
         echo
         read -p "Proceed with installation? (y/n): " confirm
         if [[ "${confirm,,}" != "y" ]]; then echo "Aborted."; return 1; fi
@@ -732,8 +732,14 @@ EOF
 Description=Run Restic Backup on a schedule
 
 [Timer]
-OnCalendar=$schedule
 Persistent=true
+EOF
+    while IFS= read -r schedule_line; do
+        if [ -n "$schedule_line" ]; then
+            echo "OnCalendar=$schedule_line" >> "$timer_file"
+        fi
+    done <<< "$schedule"
+    cat >> "$timer_file" << EOF
 
 [Install]
 WantedBy=timers.target
@@ -743,7 +749,7 @@ EOF
     if systemctl daemon-reload && systemctl enable --now restic-backup.timer; then
         echo -e "${C_GREEN}✅ systemd timer installed and activated successfully.${C_RESET}"
         echo -e "\n${C_BOLD}--- Verifying Status ---${C_RESET}"
-        systemctl status restic-backup.timer --no-pager
+        systemctl list-timers restic-backup.timer
     else
         echo -e "${C_RED}❌ Failed to install or start systemd timer.${C_RESET}" >&2
         return 1
@@ -755,8 +761,6 @@ install_crontab() {
     local schedule="$2"
     local log_file="$3"
     local cron_file="/etc/cron.d/restic-backup"
-
-    # --- Path 1: File exists (Append mode) ---
     if [ -f "$cron_file" ]; then
         echo -e "${C_YELLOW}Existing cron file found at $cron_file:${C_RESET}"
         cat "$cron_file"
@@ -766,10 +770,8 @@ install_crontab() {
             echo "Aborted."
             return 1
         fi
-
         echo "Appending new schedule(s)..."
         local new_jobs_added=0
-        # Loop to append ONLY the new job lines, checking for duplicates
         while IFS= read -r schedule_line; do
             if [ -n "$schedule_line" ]; then
                 local full_command_line="$schedule_line root $script_path"
@@ -781,7 +783,6 @@ install_crontab() {
                 fi
             fi
         done <<< "$schedule"
-
         if [ "$new_jobs_added" -eq 0 ]; then
             echo -e "${C_YELLOW}No new unique schedules were added.${C_RESET}"
         fi
