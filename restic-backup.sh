@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.29 - 2025.09.21
+#         Restic Backup Script v0.30 - 2025.09.26
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.29"
+SCRIPT_VERSION="0.30"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -457,6 +457,10 @@ send_notification() {
 setup_environment() {
     export RESTIC_REPOSITORY
     export RESTIC_PASSWORD_FILE
+    if [ -n "${RESTIC_CACHE_DIR:-}" ]; then
+        export RESTIC_CACHE_DIR
+        mkdir -p "$RESTIC_CACHE_DIR"
+    fi
     if [ -n "${EXCLUDE_PATTERNS:-}" ]; then
         EXCLUDE_TEMP_FILE=$(mktemp)
         echo "$EXCLUDE_PATTERNS" | tr ' ' '\n' > "$EXCLUDE_TEMP_FILE"
