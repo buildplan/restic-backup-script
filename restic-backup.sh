@@ -16,13 +16,13 @@ HOSTNAME=$(hostname -s)
 
 # --- Color Palette ---
 if [ -t 1 ]; then
-    C_RESET='\e[0m'
-    C_BOLD='\e[1m'
-    C_DIM='\e[2m'
-    C_RED='\e[0;31m'
-    C_GREEN='\e[0;32m'
-    C_YELLOW='\e[0;33m'
-    C_CYAN='\e[0;36m'
+    C_RESET=$'\e[0m'
+    C_BOLD=$'\e[1m'
+    C_DIM=$'\e[2m'
+    C_RED=$'\e[0;31m'
+    C_GREEN=$'\e[0;32m'
+    C_YELLOW=$'\e[0;33m'
+    C_CYAN=$'\e[0;36m'
 else
     C_RESET=''
     C_BOLD=''
