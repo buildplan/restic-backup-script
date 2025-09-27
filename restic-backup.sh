@@ -1227,22 +1227,41 @@ case "${1:-}" in
         fi
         run_preflight_checks "backup" "quiet"
         log_message "=== Starting backup run ==="
-        if run_backup; then
+
+        local backup_exit_code=0
+        if ! run_backup; then
+            backup_exit_code=1
+        fi
+
+        if [ "$backup_exit_code" -eq 0 ]; then
             run_forget
             if [ "${CHECK_AFTER_BACKUP:-false}" = "true" ]; then
                 run_check
             fi
         fi
+
         log_message "=== Backup run completed ==="
 
-        # --- Ping Healthchecks.io on success ---
-        if [[ -n "${HEALTHCHECKS_URL:-}" ]]; then
+        # --- Ping Healthchecks.io (Success or Failure) ---
+        if [ "$backup_exit_code" -eq 0 ] && [[ -n "${HEALTHCHECKS_URL:-}" ]]; then
             log_message "Pinging Healthchecks.io to signal successful run."
             if ! curl -fsS -m 15 --retry 3 "${HEALTHCHECKS_URL}" >/dev/null 2>>"$LOG_FILE"; then
-                log_message "WARNING: Healthchecks.io ping failed."
+                log_message "WARNING: Healthchecks.io success ping failed."
                 send_notification "Healthchecks Ping Failed: $HOSTNAME" "warning" \
                     "${NTFY_PRIORITY_WARNING}" "warning" "Failed to ping Healthchecks.io after successful backup."
             fi
+        elif [ "$backup_exit_code" -ne 0 ] && [[ -n "${HEALTHCHECKS_URL:-}" ]]; then
+            log_message "Pinging Healthchecks.io with failure signal."
+            if ! curl -fsS -m 15 --retry 3 "${HEALTHCHECKS_URL}/fail" >/dev/null 2>>"$LOG_FILE"; then
+                log_message "WARNING: Healthchecks.io failure ping failed."
+                send_notification "Healthchecks Ping Failed: $HOSTNAME" "warning" \
+                    "${NTFY_PRIORITY_WARNING}" "warning" "Failed to ping Healthchecks.io /fail endpoint after backup failure."
+            fi
+        fi
+
+        # Exit with the correct code to signal success or failure to the scheduler
+        if [ "$backup_exit_code" -ne 0 ]; then
+            exit "$backup_exit_code"
         fi
         ;;
 esac
