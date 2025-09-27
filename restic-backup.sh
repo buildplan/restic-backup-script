@@ -1228,7 +1228,7 @@ case "${1:-}" in
         run_preflight_checks "backup" "quiet"
         log_message "=== Starting backup run ==="
 
-        local backup_exit_code=0
+        backup_exit_code=0
         if ! run_backup; then
             backup_exit_code=1
         fi
