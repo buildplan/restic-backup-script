@@ -659,7 +659,7 @@ run_install_scheduler() {
             local hour2=${time2%%:*} min2=${time2##*:}
             printf -v systemd_schedule "*-*-* %s:%s:00\n*-*-* %s:%s:00" "$hour1" "$min1" "$hour2" "$min2"
             systemd_schedule="*-*-* ${hour1}:${min1}:00\n*-*-* ${hour2}:${min2}:00"
-            cron_schedule="${min1} ${hour1} * * *\n${min2} ${hour2} * * *"
+            printf -v cron_schedule "%s %s * * *\n%s %s * * *" "$min1" "$hour1" "$min2" "$hour2"
             ;;
         3)
             if [[ "$scheduler_choice" == "1" ]]; then
