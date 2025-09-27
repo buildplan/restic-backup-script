@@ -617,15 +617,15 @@ run_install_scheduler() {
     local script_path
     script_path=$(realpath "$0")
     echo -e "\n${C_YELLOW}Which scheduling system would you like to use?${C_RESET}"
-    echo "  1) ${C_GREEN}systemd timer${C_RESET} (Modern, recommended, more flexible logging)"
-    echo "  2) ${C_CYAN}crontab${C_RESET}       (Classic, simple, universally available)"
+    echo -e "  1) ${C_GREEN}systemd timer${C_RESET} (Modern, recommended, more flexible logging)"
+    echo -e "  2) ${C_CYAN}crontab${C_RESET}       (Classic, simple, universally available)"
     local scheduler_choice
     read -p "Enter your choice [1]: " scheduler_choice
     scheduler_choice=${scheduler_choice:-1}
     echo -e "\n${C_YELLOW}How often would you like the backup to run?${C_RESET}"
-    echo "  1) ${C_GREEN}Once daily${C_RESET}"
-    echo "  2) ${C_GREEN}Twice daily${C_RESET} (e.g., every 12 hours)"
-    echo "  3) ${C_CYAN}Custom schedule${C_RESET} (provide your own expression)"
+    echo -e "  1) ${C_GREEN}Once daily${C_RESET}"
+    echo -e "  2) ${C_GREEN}Twice daily${C_RESET} (e.g., every 12 hours)"
+    echo -e "  3) ${C_CYAN}Custom schedule${C_RESET} (provide your own expression)"
     local schedule_choice
     read -p "Enter your choice [1]: " schedule_choice
     schedule_choice=${schedule_choice:-1}
