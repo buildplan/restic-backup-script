@@ -33,6 +33,8 @@ This script automates encrypted, deduplicated backups of local directories to a 
   - `sudo ./restic-backup.sh --check` - Verify repository integrity by checking a subset of data.
   - `sudo ./restic-backup.sh --check-full` - Run a full check verifying all repository data.
   - `sudo ./restic-backup.sh --test` - Validate configuration, permissions, and SSH connectivity.
+  - `sudo ./restic-backup.sh --install-scheduler` - Run the interactive wizard to set up an automated backup schedule (systemd/cron).
+  - `sudo ./restic-backup.sh --uninstall-scheduler` - Remove a schedule created by the wizard.
   - `sudo ./restic-backup.sh --restore` - Start the interactive restore wizard.
   - `sudo ./restic-backup.sh --forget` - Manually apply the retention policy and prune old data.
   - `sudo ./restic-backup.sh --diff` - Show a summary of changes between the last two snapshots. 
@@ -238,7 +240,25 @@ Before the first backup, you need to create the repository password file and ini
     sudo ./restic-backup.sh --init
     ```
 
-### 5. Set up a Cron Job
+### 5. Set up an Automated Schedule (Recommended)
+
+The easiest and most reliable way to schedule your backups is to use the script's built-in interactive wizard. It will guide you through creating and enabling either a modern `systemd timer` (recommended) or a traditional `cron job`.
+
+1.  Navigate to your script directory:
+    ```sh
+    cd /root/scripts/backup
+    ```
+
+2.  Run the scheduler installation wizard:
+    ```sh
+    sudo ./restic-backup.sh --install-scheduler
+    ```
+
+Follow the on-screen prompts to choose your preferred scheduling system and frequency. The script will handle creating all the necessary files and enabling the service for you.
+
+#### Manual Cron Job Setup
+
+If you prefer to manage the schedule manually instead of using the wizard, you can edit the root crontab directly.
 
 To run the backup automatically, edit the root crontab.
 
