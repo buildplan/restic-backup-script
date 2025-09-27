@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.32 - 2025.09.27
+#         Restic Backup Script v0.33 - 2025.09.27
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.32"
+SCRIPT_VERSION="0.33"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -446,6 +446,59 @@ send_discord() {
         "$DISCORD_WEBHOOK_URL" >/dev/null 2>>"$LOG_FILE"
 }
 
+send_teams() {
+    local title="$1"
+    local status="$2"
+    local message="$3"
+    if [[ "${TEAMS_ENABLED:-false}" != "true" ]] || [ -z "${TEAMS_WEBHOOK_URL:-}" ]; then
+        return 0
+    fi
+    local color
+    case "$status" in
+        success) color="2ECC71" ;;
+        warning) color="F1C40F" ;;
+        failure) color="E74C3C" ;;
+        *) color="95A5A6" ;;
+    esac
+    local escaped_title
+    escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
+    local escaped_message
+    escaped_message=$(echo -e "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+    local json_payload
+    printf -v json_payload '{
+      "@type": "MessageCard",
+      "@context": "http://schema.org/extensions",
+      "themeColor": "%s",
+      "summary": "%s",
+      "sections": [{
+        "activityTitle": "%s",
+        "text": "%s",
+        "markdown": true
+      }]
+    }' "$color" "$escaped_title" "$escaped_title" "$escaped_message"
+    curl -s --max-time 15 \
+        -H "Content-Type: application/json" \
+        -d "$json_payload" \
+        "$TEAMS_WEBHOOK_URL" >/dev/null 2>>"$LOG_FILE"
+}
+
+send_slack() {
+    local title="$1"
+    local status="$2" 
+    local message="$3"
+    
+    if [[ "${SLACK_ENABLED:-false}" != "true" ]] || [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+        return 0
+    fi
+    local escaped_message=$(echo -e "$title\n\n$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+    local json_payload
+    printf -v json_payload '{"text": "%s"}' "$escaped_message"
+    curl -s --max-time 15 \
+        -H "Content-Type: application/json" \
+        -d "$json_payload" \
+        "$SLACK_WEBHOOK_URL" >/dev/null 2>>"$LOG_FILE"
+}
+
 send_notification() {
     local title="$1"
     local tags="$2"
@@ -454,6 +507,8 @@ send_notification() {
     local message="$5"
     send_ntfy "$title" "$tags" "$ntfy_priority" "$message"
     send_discord "$title" "$discord_status" "$message"
+    send_slack "$title" "$discord_status" "$message"
+    send_teams "$title" "$discord_status" "$message"
 }
 
 setup_environment() {
@@ -470,9 +525,16 @@ setup_environment() {
 }
 
 cleanup() {
+    local exit_code=$?
     [ -n "${EXCLUDE_TEMP_FILE:-}" ] && rm -f "$EXCLUDE_TEMP_FILE"
     if [ -n "${LOCK_FD:-}" ]; then
         flock -u "$LOCK_FD"
+    fi
+    if [ "$exit_code" -ne 0 ]; then
+        local line_num=${BASH_LINENO[0]}
+        log_message "FATAL: Script terminated with exit code $exit_code near line $line_num."
+        send_notification "Backup Crashed: $HOSTNAME" "x" \
+            "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly with exit code $exit_code."
     fi
 }
 
@@ -658,7 +720,6 @@ run_install_scheduler() {
             local hour1=${time1%%:*} min1=${time1##*:}
             local hour2=${time2%%:*} min2=${time2##*:}
             printf -v systemd_schedule "*-*-* %s:%s:00\n*-*-* %s:%s:00" "$hour1" "$min1" "$hour2" "$min2"
-            systemd_schedule="*-*-* ${hour1}:${min1}:00\n*-*-* ${hour2}:${min2}:00"
             printf -v cron_schedule "%s %s * * *\n%s %s * * *" "$min1" "$hour1" "$min2" "$hour2"
             ;;
         3)
@@ -996,7 +1057,7 @@ run_restore() {
     read -p "Enter snapshot ID to restore (or 'latest'): " snapshot_id
     if [ -z "$snapshot_id" ]; then
         echo "No snapshot specified, exiting"
-        return 1
+        return 0
     fi
     local list_confirm
     read -p "Would you like to list the contents of this snapshot to find exact paths? (y/n): " list_confirm
@@ -1013,7 +1074,7 @@ run_restore() {
         read -p "${C_RED}WARNING: You are restoring to a critical system directory ('$restore_dest')${C_RESET}. This is highly unusual and could damage your system. Are you absolutely sure? (y/n): " confirm_dangerous_restore
         if [[ "${confirm_dangerous_restore,,}" != "y" ]]; then
             echo "Restore cancelled."
-            return 1
+            return 0
         fi
     fi
     local include_paths=()
@@ -1148,7 +1209,6 @@ run_snapshots_delete() {
 check_for_script_update
 check_and_install_restic
 trap cleanup EXIT
-trap 'log_message "FATAL: Script terminated unexpectedly on line $LINENO. Sending crash notification."; send_notification "Backup Crashed: $HOSTNAME" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly on line $LINENO."' ERR
 VERBOSE_MODE=false
 if [[ "${1:-}" == "--verbose" ]]; then
     VERBOSE_MODE=true
