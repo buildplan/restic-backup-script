@@ -455,10 +455,10 @@ send_teams() {
     fi
     local color
     case "$status" in
-        success) color="2ECC71" ;;
-        warning) color="F1C40F" ;;
-        failure) color="E74C3C" ;;
-        *) color="95A5A6" ;;
+        success) color="good" ;;
+        warning) color="warning" ;;
+        failure) color="attention" ;;
+        *) color="default" ;;
     esac
     local escaped_title
     escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
@@ -466,16 +466,35 @@ send_teams() {
     escaped_message=$(echo -e "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
     local json_payload
     printf -v json_payload '{
-      "@type": "MessageCard",
-      "@context": "http://schema.org/extensions",
-      "themeColor": "%s",
-      "summary": "%s",
-      "sections": [{
-        "activityTitle": "%s",
-        "text": "%s",
-        "markdown": true
+      "type": "message",
+      "attachments": [{
+        "contentType": "application/vnd.microsoft.card.adaptive",
+        "content": {
+          "type": "AdaptiveCard",
+          "version": "1.4",
+          "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+          "body": [
+            {
+              "type": "TextBlock",
+              "text": "%s",
+              "weight": "bolder",
+              "size": "large",
+              "wrap": true
+            },
+            {
+              "type": "TextBlock",
+              "text": "%s",
+              "wrap": true,
+              "separator": true
+            }
+          ],
+          "msteams": { "width": "full", "entities": [] },
+          "style": "emphasis",
+           "bleed": true,
+           "verticalContentAlignment": "center"
+        }
       }]
-    }' "$color" "$escaped_title" "$escaped_title" "$escaped_message"
+    }' "$escaped_title" "$escaped_message"
     curl -s --max-time 15 \
         -H "Content-Type: application/json" \
         -d "$json_payload" \
