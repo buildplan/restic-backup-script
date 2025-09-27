@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.31 - 2025.09.27
+#         Restic Backup Script v0.32 - 2025.09.27
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.31"
+SCRIPT_VERSION="0.32"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -16,13 +16,13 @@ HOSTNAME=$(hostname -s)
 
 # --- Color Palette ---
 if [ -t 1 ]; then
-    C_RESET='\e[0m'
-    C_BOLD='\e[1m'
-    C_DIM='\e[2m'
-    C_RED='\e[0;31m'
-    C_GREEN='\e[0;32m'
-    C_YELLOW='\e[0;33m'
-    C_CYAN='\e[0;36m'
+    C_RESET=$'\e[0m'
+    C_BOLD=$'\e[1m'
+    C_DIM=$'\e[2m'
+    C_RED=$'\e[0;31m'
+    C_GREEN=$'\e[0;32m'
+    C_YELLOW=$'\e[0;33m'
+    C_CYAN=$'\e[0;36m'
 else
     C_RESET=''
     C_BOLD=''
@@ -1008,6 +1008,13 @@ run_restore() {
     if [[ -z "$restore_dest" || "$restore_dest" != /* ]]; then
         echo -e "${C_RED}Error: Must be a non-empty, absolute path. Aborting.${C_RESET}" >&2
         return 1
+    fi
+    if [[ "$restore_dest" == "/" || "$restore_dest" == "/etc" || "$restore_dest" == "/usr" ]]; then
+        read -p "${C_RED}WARNING: You are restoring to a critical system directory ('$restore_dest')${C_RESET}. This is highly unusual and could damage your system. Are you absolutely sure? (y/n): " confirm_dangerous_restore
+        if [[ "${confirm_dangerous_restore,,}" != "y" ]]; then
+            echo "Restore cancelled."
+            return 1
+        fi
     fi
     local include_paths=()
     read -p "Optional: Enter specific file(s) to restore, separated by spaces (leave blank for full restore): " -a include_paths
