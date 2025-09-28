@@ -216,6 +216,43 @@ The most reliable way for the script to connect to a remote server is via an SSH
 
 5.  **Edit `restic-backup.conf` and `restic-excludes.txt`** to specify your repository path, source directories, notification settings, and exclusion patterns.
 
+### Configuration (`restic-backup.conf`)
+
+All script behavior is controlled by the `restic-backup.conf` file. Below is an overview of the key settings available.
+
+#### Core Settings
+* `RESTIC_REPOSITORY`: The connection string for your remote storage.
+* `RESTIC_PASSWORD_FILE`: The absolute path to the file containing your repository's encryption password.
+* `BACKUP_SOURCES`: A list of local directories to back up. Use Bash array syntax `("/path/one" "/path/two")` to handle spaces correctly.
+
+#### Retention Policy
+You can define how many snapshots to keep for various timeframes. The script will automatically remove older snapshots that fall outside these rules.
+* `KEEP_LAST`: Number of the most recent snapshots to keep.
+* `KEEP_DAILY`: Number of daily snapshots to keep.
+* `KEEP_WEEKLY`: Number of weekly snapshots to keep.
+* `KEEP_MONTHLY`: Number of monthly snapshots to keep.
+* `KEEP_YEARLY`: Number of yearly snapshots to keep.
+
+#### Notifications
+The script can send detailed status notifications to multiple services. Each can be enabled or disabled individually.
+* `NTFY_ENABLED`: Set to `true` to enable ntfy notifications.
+* `DISCORD_ENABLED`: Set to `true` to enable Discord notifications.
+* `SLACK_ENABLED`: Set to `true` to enable Slack notifications.
+* `TEAMS_ENABLED`: Set to `true` to enable Microsoft Teams notifications.
+* You must also provide the corresponding `_URL` and `_TOKEN` for each service you enable.
+
+#### Exclusions
+You have two ways to exclude files and directories from your backups:
+1.  **`EXCLUDE_FILE`**: Point this to a text file (like `restic-excludes.txt`) containing one exclusion pattern per line.
+2.  **`EXCLUDE_PATTERNS`**: A space-separated list of patterns to exclude directly in the configuration file (e.g., `*.tmp *.log`).
+
+#### Performance and Maintenance
+* `LOW_PRIORITY`: Set to `true` to run the backup with lower CPU (`nice`) and I/O (`ionice`) priority, minimizing impact on other services.
+* `CHECK_AFTER_BACKUP`: Set to `true` to automatically run a repository integrity check after each successful backup.
+* `PRUNE_AFTER_FORGET`: Set to `true` to automatically prune the repository after applying the retention policy, which frees up storage space.
+
+-----
+
 ### 4. Initial Repository Setup
 
 Before the first backup, you need to create the repository password file and initialize the remote repository.
