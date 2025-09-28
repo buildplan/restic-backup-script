@@ -720,6 +720,39 @@ run_preflight_checks() {
     fi
 }
 
+rotate_log() {
+    if [ ! -f "$LOG_FILE" ]; then
+        return 0
+    fi
+    local max_size_bytes=$(( ${MAX_LOG_SIZE_MB:-10} * 1024 * 1024 ))
+    local log_size
+    if command -v stat >/dev/null 2>&1; then
+        log_size=$(stat -f%z "$LOG_FILE" 2>/dev/null || stat -c%s "$LOG_FILE" 2>/dev/null || wc -c < "$LOG_FILE" 2>/dev/null || echo 0)
+    else
+        log_size=0
+    fi
+    if [ "$log_size" -gt "$max_size_bytes" ]; then
+        mv "$LOG_FILE" "${LOG_FILE}.$(date +%Y%m%d_%H%M%S)"
+        touch "$LOG_FILE"
+        find "$(dirname "$LOG_FILE")" -name "$(basename "$LOG_FILE").*" \
+            -type f -mtime +"${LOG_RETENTION_DAYS:-30}" -delete 2>/dev/null || true
+    fi
+}
+
+run_with_priority() {
+    local cmd=("$@")
+    if [ "${LOW_PRIORITY:-true}" = "true" ]; then
+        local priority_cmd=(nice -n "${NICE_LEVEL:-19}")
+        if command -v ionice >/dev/null 2>&1; then
+            priority_cmd+=(ionice -c "${IONICE_CLASS:-3}")
+        fi
+        priority_cmd+=("${cmd[@]}")
+        "${priority_cmd[@]}"
+    else
+        "${cmd[@]}"
+    fi
+}
+
 run_install_scheduler() {
     echo -e "${C_BOLD}--- Backup Schedule Installation Wizard ---${C_RESET}"
     if [[ $EUID -ne 0 ]]; then
