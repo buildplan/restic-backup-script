@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.34 - 2025.09.27
+#         Restic Backup Script v0.35 - 2025.09.28
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.34"
+SCRIPT_VERSION="0.35"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -298,15 +298,13 @@ handle_crash() {
 
 build_backup_command() {
     local cmd=(restic)
-    [ "${LOG_LEVEL:-1}" -le 0 ] && cmd+=(--quiet)
-    [ "${LOG_LEVEL:-1}" -ge 2 ] && cmd+=(--verbose)
-    [ "${LOG_LEVEL:-1}" -ge 3 ] && cmd+=(--verbose)
+    cmd+=($(get_verbosity_flags))
     if [ -n "${SFTP_CONNECTIONS:-}" ]; then
         cmd+=(-o "sftp.connections=${SFTP_CONNECTIONS}")
     fi
-    cmd+=(backup)
-    [ -n "${LIMIT_THREADS:-}" ] && cmd+=(--limit-threads "${LIMIT_THREADS}")
     [ -n "${LIMIT_UPLOAD:-}" ] && cmd+=(--limit-upload "${LIMIT_UPLOAD}")
+    cmd+=(backup)
+    [ -n "${READ_CONCURRENCY:-}" ] && cmd+=(--read-concurrency "${READ_CONCURRENCY}")
     [ -n "${BACKUP_TAG:-}" ] && cmd+=(--tag "$BACKUP_TAG")
     [ -n "${COMPRESSION:-}" ] && cmd+=(--compression "$COMPRESSION")
     [ -n "${PACK_SIZE:-}" ] && cmd+=(--pack-size "$PACK_SIZE")
@@ -1021,6 +1019,19 @@ run_uninstall_scheduler() {
     fi
 }
 
+get_verbosity_flags() {
+    local effective_log_level="${LOG_LEVEL:-1}"
+    if [[ "${VERBOSE_MODE}" == "true" ]]; then
+        effective_log_level=2 # Force verbose level 2 when --verbose is used
+    fi
+    local flags=()
+    [ "$effective_log_level" -le 0 ] && flags+=(--quiet)
+    [ "$effective_log_level" -ge 2 ] && flags+=(--verbose)
+    [ "$effective_log_level" -ge 3 ] && flags+=(--verbose)
+    
+    echo "${flags[@]}"
+}
+
 # =================================================================
 # MAIN OPERATIONS
 # =================================================================
@@ -1120,7 +1131,9 @@ run_backup() {
 run_forget() {
     echo -e "${C_BOLD}--- Cleaning Old Snapshots ---${C_RESET}"
     log_message "Running retention policy"
-    local forget_cmd=(restic forget)
+    local forget_cmd=(restic)
+    forget_cmd+=($(get_verbosity_flags))
+    forget_cmd+=(forget)
     [ -n "${KEEP_LAST:-}" ] && forget_cmd+=(--keep-last "$KEEP_LAST")
     [ -n "${KEEP_DAILY:-}" ] && forget_cmd+=(--keep-daily "$KEEP_DAILY")
     [ -n "${KEEP_WEEKLY:-}" ] && forget_cmd+=(--keep-weekly "$KEEP_WEEKLY")
