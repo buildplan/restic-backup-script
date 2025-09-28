@@ -236,11 +236,14 @@ done
 
 display_help() {
     local readme_url="https://github.com/buildplan/restic-backup-script/blob/main/README.md"
+    local prog
+    prog=$(basename "$0")
+
     echo -e "${C_BOLD}${C_CYAN}Restic Backup Script (v${SCRIPT_VERSION})${C_RESET}"
     echo "Encrypted, deduplicated backups with restic."
     echo
     echo -e "${C_BOLD}${C_YELLOW}USAGE:${C_RESET}"
-    echo -e "  sudo $0 ${C_GREEN}[options] [command]${C_RESET}"
+    echo -e "  sudo $prog ${C_GREEN}[options] [command]${C_RESET}"
     echo
     echo -e "${C_BOLD}${C_YELLOW}OPTIONS:${C_RESET}"
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--verbose" "Show detailed live output."
@@ -265,9 +268,9 @@ display_help() {
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--uninstall-scheduler" "Remove an automated schedule."
     echo
     echo -e "${C_BOLD}${C_YELLOW}QUICK EXAMPLES:${C_RESET}"
-    echo -e "  Run a backup now:            ${C_GREEN}sudo $0${C_RESET}"
-    echo -e "  Verbose diff summary:        ${C_GREEN}sudo $0 --verbose --diff${C_RESET}"
-    echo -e "  Fix perms (interactive):     ${C_GREEN}sudo $0 --fix-permissions --test${C_RESET}"
+    echo -e "  Run a backup now:            ${C_GREEN}sudo $prog${C_RESET}"
+    echo -e "  Verbose diff summary:        ${C_GREEN}sudo $prog --verbose --diff${C_RESET}"
+    echo -e "  Fix perms (interactive):     ${C_GREEN}sudo $prog --fix-permissions --test${C_RESET}"
     echo
     echo -e "Config: ${C_DIM}${CONFIG_FILE}${C_RESET}  Log: ${C_DIM}${LOG_FILE}${C_RESET}"
     echo
