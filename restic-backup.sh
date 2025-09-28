@@ -1289,39 +1289,63 @@ run_snapshots_delete() {
 # MAIN SCRIPT EXECUTION
 # =================================================================
 
-check_for_script_update
-check_and_install_restic
-trap 'handle_crash $LINENO' ERR
-trap cleanup EXIT
+# 1. Parse flags.
 VERBOSE_MODE=false
-if [[ "${1:-}" == "--verbose" ]]; then
-    VERBOSE_MODE=true
-    shift
-fi
-
-if [[ "${1:-}" == "--fix-permissions" ]]; then
-    if ! [ -t 1 ]; then
+AUTO_FIX_PERMS=${AUTO_FIX_PERMS:-false}
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --verbose)
+      VERBOSE_MODE=true
+      shift
+      ;;
+    --fix-permissions)
+      if ! [ -t 1 ]; then
         echo -e "${C_RED}ERROR: The --fix-permissions flag can only be used in an interactive session.${C_RESET}" >&2
         exit 1
-    fi
-    AUTO_FIX_PERMS=true
-    shift
-fi
-if [[ "${AUTO_FIX_PERMS:-false}" == "true" && ! -t 1 ]]; then
-    echo -e "${C_YELLOW}WARNING: AUTO_FIX_PERMS=true is ignored in non-interactive mode for safety.${C_RESET}"
-    AUTO_FIX_PERMS=false
-fi
+      fi
+      AUTO_FIX_PERMS=true
+      shift
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
+# 2. Set traps.
+trap 'handle_crash $LINENO' ERR
+trap cleanup EXIT
+
+# 3. Acquire the lock.
 exec 200>"$LOCK_FILE"
 if ! flock -n 200; then
     echo -e "${C_RED}Another backup is already running${C_RESET}" >&2
     exit 5
 fi
 LOCK_FD=200
+
+# 4. After lock, it's safe to run updates.
+check_for_script_update
+check_and_install_restic
+
+# 5. Prepare the environment and run final pre-flight checks.
 setup_environment
 rotate_log
 
-# Handle different modes
+# Handle the --fix-permissions and AUTO_FIX_PERMS config for non-interactive mode
+if [[ "${AUTO_FIX_PERMS}" == "true" ]]; then
+    if ! [ -t 1 ]; then
+        log_message "AUTO_FIX_PERMS=true ignored in non-interactive mode for safety."
+        echo -e "${C_YELLOW}WARNING: AUTO_FIX_PERMS is enabled but ignored in non-interactive mode for safety.${C_RESET}"
+        AUTO_FIX_PERMS=false
+    fi
+fi
+
+# 6. Execute the requested command.
 case "${1:-}" in
     --install-scheduler)
         run_install_scheduler
