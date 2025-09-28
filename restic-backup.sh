@@ -479,7 +479,8 @@ send_teams() {
               "text": "%s",
               "weight": "bolder",
               "size": "large",
-              "wrap": true
+              "wrap": true,
+              "color": "%s"
             },
             {
               "type": "TextBlock",
@@ -488,13 +489,10 @@ send_teams() {
               "separator": true
             }
           ],
-          "msteams": { "width": "full", "entities": [] },
-          "style": "emphasis",
-           "bleed": true,
-           "verticalContentAlignment": "center"
+          "msteams": { "width": "full", "entities": [] }
         }
       }]
-    }' "$escaped_title" "$escaped_message"
+    }' "$escaped_title" "$color" "$escaped_message"
     curl -s --max-time 15 \
         -H "Content-Type: application/json" \
         -d "$json_payload" \
@@ -505,13 +503,42 @@ send_slack() {
     local title="$1"
     local status="$2" 
     local message="$3"
-    
     if [[ "${SLACK_ENABLED:-false}" != "true" ]] || [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
         return 0
     fi
-    local escaped_message=$(echo -e "$title\n\n$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+    local color
+    case "$status" in
+        success) color="#36a64f" ;;
+        warning) color="#ffa500" ;;
+        failure) color="#d50200" ;;
+        *) color="#808080" ;;
+    esac
+    local escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
+    local escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
     local json_payload
-    printf -v json_payload '{"text": "%s"}' "$escaped_message"
+    printf -v json_payload '{
+        "attachments": [
+            {
+                "color": "%s",
+                "blocks": [
+                    {
+                        "type": "header",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "%s"
+                        }
+                    },
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": "%s"
+                        }
+                    }
+                ]
+            }
+        ]
+    }' "$color" "$escaped_title" "$escaped_message"
     curl -s --max-time 15 \
         -H "Content-Type: application/json" \
         -d "$json_payload" \
