@@ -623,13 +623,46 @@ run_preflight_checks() {
         fi
         if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     fi
-    # Configuration Files
+
+    # --- Config Files Existence & Permissions Check ---
     if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Configuration Files${C_RESET}"; fi
+    if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Secure permissions on config file (600)..."; fi
+    local perms
+    perms=$(stat -c %a "$CONFIG_FILE" 2>/dev/null)
+    if [[ "$perms" != "600" ]]; then
+        echo -e "[${C_YELLOW} WARN ${C_RESET}]"
+        echo -e "${C_YELLOW}    ⚠️  Configuration file has insecure permissions ($perms), should be 600.${C_RESET}"
+        if [[ "${AUTO_FIX_PERMS}" == "true" ]]; then
+            if chmod 600 "$CONFIG_FILE"; then
+                echo -e "${C_GREEN}    ✅ Automatically corrected permissions to 600.${C_RESET}"
+            else
+                echo -e "${C_RED}    ❌ Failed to correct permissions.${C_RESET}"
+            fi
+        fi
+    else
+        if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
+    fi
+
+    # --- Password File Existence & Permissions Check ---
     if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Password file ('$RESTIC_PASSWORD_FILE')..."; fi
     if [ ! -r "$RESTIC_PASSWORD_FILE" ]; then
         handle_failure "Password file not found or not readable: $RESTIC_PASSWORD_FILE" "11"
     fi
-    if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
+    perms=$(stat -c %a "$RESTIC_PASSWORD_FILE" 2>/dev/null)
+    if [[ "$perms" != "400" ]]; then
+        echo -e "[${C_YELLOW} WARN ${C_RESET}]"
+        echo -e "${C_YELLOW}    ⚠️  Password file has insecure permissions ($perms), should be 400.${C_RESET}"
+        if [[ "${AUTO_FIX_PERMS}" == "true" ]]; then
+            if chmod 400 "$RESTIC_PASSWORD_FILE"; then
+                echo -e "${C_GREEN}    ✅ Automatically corrected permissions to 400.${C_RESET}"
+            else
+                echo -e "${C_RED}    ❌ Failed to correct permissions.${C_RESET}"
+            fi
+        fi
+    else
+        if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
+    fi
+    # --- Exclude File Check ---
     if [ -n "${EXCLUDE_FILE:-}" ]; then
         if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Exclude file ('$EXCLUDE_FILE')..."; fi
         if [ ! -r "$EXCLUDE_FILE" ]; then
@@ -637,11 +670,14 @@ run_preflight_checks() {
         fi
         if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     fi
+    
+    # --- Log File Check ---
     if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Log file writability ('$LOG_FILE')..."; fi
     if ! touch "$LOG_FILE" >/dev/null 2>&1; then
         handle_failure "The log file or its directory is not writable: ${LOG_FILE}" "15"
     fi
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
+
     # Repository State
     if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Repository State${C_RESET}"; fi
     if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Repository connectivity and credentials..."; fi
@@ -681,39 +717,6 @@ run_preflight_checks() {
     fi
     if [[ "$verbosity" == "quiet" ]]; then
         echo -e "${C_GREEN}✅ Pre-flight checks passed.${C_RESET}"
-    fi
-}
-
-rotate_log() {
-    if [ ! -f "$LOG_FILE" ]; then
-        return 0
-    fi
-    local max_size_bytes=$(( ${MAX_LOG_SIZE_MB:-10} * 1024 * 1024 ))
-    local log_size
-    if command -v stat >/dev/null 2>&1; then
-        log_size=$(stat -f%z "$LOG_FILE" 2>/dev/null || stat -c%s "$LOG_FILE" 2>/dev/null || wc -c < "$LOG_FILE" 2>/dev/null || echo 0)
-    else
-        log_size=0
-    fi
-    if [ "$log_size" -gt "$max_size_bytes" ]; then
-        mv "$LOG_FILE" "${LOG_FILE}.$(date +%Y%m%d_%H%M%S)"
-        touch "$LOG_FILE"
-        find "$(dirname "$LOG_FILE")" -name "$(basename "$LOG_FILE").*" \
-            -type f -mtime +"${LOG_RETENTION_DAYS:-30}" -delete 2>/dev/null || true
-    fi
-}
-
-run_with_priority() {
-    local cmd=("$@")
-    if [ "${LOW_PRIORITY:-true}" = "true" ]; then
-        local priority_cmd=(nice -n "${NICE_LEVEL:-19}")
-        if command -v ionice >/dev/null 2>&1; then
-            priority_cmd+=(ionice -c "${IONICE_CLASS:-3}")
-        fi
-        priority_cmd+=("${cmd[@]}")
-        "${priority_cmd[@]}"
-    else
-        "${cmd[@]}"
     fi
 }
 
@@ -1260,6 +1263,14 @@ trap cleanup EXIT
 VERBOSE_MODE=false
 if [[ "${1:-}" == "--verbose" ]]; then
     VERBOSE_MODE=true
+    shift
+fi
+if [[ "${1:-}" == "--fix-permissions" ]]; then
+    if ! [ -t 1 ]; then
+        echo -e "${C_RED}ERROR: The --fix-permissions flag can only be used in an interactive session.${C_RESET}" >&2
+        exit 1
+    fi
+    AUTO_FIX_PERMS=true
     shift
 fi
 exec 200>"$LOCK_FILE"
