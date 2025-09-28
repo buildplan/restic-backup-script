@@ -273,6 +273,14 @@ log_message() {
     fi
 }
 
+handle_crash() {
+    local exit_code=$?
+    local line_num=$1
+    log_message "FATAL: Script terminated unexpectedly on line $line_num with exit code $exit_code."
+    send_notification "Backup Crashed: $HOSTNAME" "x" \
+        "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly on line $line_num."
+}
+
 build_backup_command() {
     local cmd=(restic)
     [ "${LOG_LEVEL:-1}" -le 0 ] && cmd+=(--quiet)
@@ -463,7 +471,7 @@ send_teams() {
     local escaped_title
     escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
     local escaped_message
-    escaped_message=$(echo -e "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+    escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
     local json_payload
     printf -v json_payload '{
       "type": "message",
@@ -571,16 +579,9 @@ setup_environment() {
 }
 
 cleanup() {
-    local exit_code=$?
     [ -n "${EXCLUDE_TEMP_FILE:-}" ] && rm -f "$EXCLUDE_TEMP_FILE"
     if [ -n "${LOCK_FD:-}" ]; then
         flock -u "$LOCK_FD"
-    fi
-    if [ "$exit_code" -ne 0 ]; then
-        local line_num=${BASH_LINENO[0]}
-        log_message "FATAL: Script terminated with exit code $exit_code near line $line_num."
-        send_notification "Backup Crashed: $HOSTNAME" "x" \
-            "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly with exit code $exit_code."
     fi
 }
 
@@ -1114,7 +1115,7 @@ run_restore() {
     read -p "Enter restore destination (absolute path): " restore_dest
     if [[ -z "$restore_dest" || "$restore_dest" != /* ]]; then
         echo -e "${C_RED}Error: Must be a non-empty, absolute path. Aborting.${C_RESET}" >&2
-        return 1
+        return 0
     fi
     if [[ "$restore_dest" == "/" || "$restore_dest" == "/etc" || "$restore_dest" == "/usr" ]]; then
         read -p "${C_RED}WARNING: You are restoring to a critical system directory ('$restore_dest')${C_RESET}. This is highly unusual and could damage your system. Are you absolutely sure? (y/n): " confirm_dangerous_restore
@@ -1208,7 +1209,7 @@ run_snapshots_delete() {
     read -p "Enter snapshot ID(s) to delete, separated by spaces: " -a ids_to_delete
     if [ ${#ids_to_delete[@]} -eq 0 ]; then
         echo "No snapshot IDs entered. Aborting."
-        return 1
+        return 0
     fi
     echo -e "\nYou have selected the following ${C_YELLOW}${#ids_to_delete[@]} snapshot(s)${C_RESET} for deletion:"
     for id in "${ids_to_delete[@]}"; do
@@ -1254,6 +1255,7 @@ run_snapshots_delete() {
 
 check_for_script_update
 check_and_install_restic
+trap 'handle_crash $LINENO' ERR
 trap cleanup EXIT
 VERBOSE_MODE=false
 if [[ "${1:-}" == "--verbose" ]]; then
