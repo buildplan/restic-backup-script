@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.34 - 2025.09.27
+#         Restic Backup Script v0.35 - 2025.09.28
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.34"
+SCRIPT_VERSION="0.35"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -304,9 +304,9 @@ build_backup_command() {
     if [ -n "${SFTP_CONNECTIONS:-}" ]; then
         cmd+=(-o "sftp.connections=${SFTP_CONNECTIONS}")
     fi
-    cmd+=(backup)
-    [ -n "${LIMIT_THREADS:-}" ] && cmd+=(--limit-threads "${LIMIT_THREADS}")
     [ -n "${LIMIT_UPLOAD:-}" ] && cmd+=(--limit-upload "${LIMIT_UPLOAD}")
+    cmd+=(backup)
+    [ -n "${READ_CONCURRENCY:-}" ] && cmd+=(--read-concurrency "${READ_CONCURRENCY}")
     [ -n "${BACKUP_TAG:-}" ] && cmd+=(--tag "$BACKUP_TAG")
     [ -n "${COMPRESSION:-}" ] && cmd+=(--compression "$COMPRESSION")
     [ -n "${PACK_SIZE:-}" ] && cmd+=(--pack-size "$PACK_SIZE")
