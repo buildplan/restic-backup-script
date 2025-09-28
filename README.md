@@ -34,6 +34,7 @@ This script automates encrypted, deduplicated backups of local directories to a 
 - `sudo ./restic-backup.sh --check` - Verify repository integrity by checking a subset of data.
 - `sudo ./restic-backup.sh --check-full` - Run a full check verifying all repository data.
 - `sudo ./restic-backup.sh --test` - Validate configuration, permissions, and SSH connectivity.
+- `sudo ./restic-backup.sh --fix-permissions --test` - Run tests and interactively auto-correct insecure file permissions.
 - `sudo ./restic-backup.sh --install-scheduler` - Run the interactive wizard to set up an automated backup schedule (systemd/cron).
 - `sudo ./restic-backup.sh --uninstall-scheduler` - Remove a schedule created by the wizard.
 - `sudo ./restic-backup.sh --restore` - Start the interactive restore wizard.
