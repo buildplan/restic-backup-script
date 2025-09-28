@@ -235,31 +235,43 @@ done
 # =================================================================
 
 display_help() {
+    local readme_url="https://github.com/buildplan/restic-backup-script/blob/main/README.md"
     echo -e "${C_BOLD}${C_CYAN}Restic Backup Script (v${SCRIPT_VERSION})${C_RESET}"
-    echo "A comprehensive script for managing encrypted, deduplicated backups with restic."
+    echo "Encrypted, deduplicated backups with restic."
     echo
     echo -e "${C_BOLD}${C_YELLOW}USAGE:${C_RESET}"
-    echo -e "  sudo $0 ${C_GREEN}[COMMAND]${C_RESET}"
+    echo -e "  sudo $0 ${C_GREEN}[options] [command]${C_RESET}"
+    echo
+    echo -e "${C_BOLD}${C_YELLOW}OPTIONS:${C_RESET}"
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--verbose" "Show detailed live output."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--fix-permissions" "Interactive only: auto-fix 600/400 on conf/secret."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--help, -h" "Display this help message."
     echo
     echo -e "${C_BOLD}${C_YELLOW}COMMANDS:${C_RESET}"
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "[no command]" "Run a standard backup and apply the retention policy."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--init" "Initialize a new restic repository (one-time setup)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--diff" "Show a summary of changes between the last two snapshots."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots" "List all available snapshots in the repository."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots-delete" "Interactively select and permanently delete specific snapshots."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--stats" "Display repository size, file counts, and stats."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check" "Verify repository integrity by checking a subset of data."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check-full" "Run a FULL, slow check verifying all repository data."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Manually apply the retention policy and prune old data."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--unlock" "Forcibly remove stale locks from the repository."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--restore" "Start the interactive restore wizard."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dry-run" "Preview backup changes without creating a new snapshot."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--test" "Validate configuration, permissions, and SSH connectivity."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--install-scheduler" "Install an automated backup schedule (systemd/cron)."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--uninstall-scheduler" "Remove an existing automated backup schedule."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--help, -h" "Display this help message."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots-delete" "Interactively select and permanently delete snapshots."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--stats" "Display repository size and file counts."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check" "Verify repository integrity (subset)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check-full" "Verify all repository data (slow)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Apply retention policy; optionally prune."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--unlock" "Remove stale repository locks."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--restore" "Interactive restore wizard."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dry-run" "Preview backup changes (no snapshot)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--test" "Validate config, permissions, connectivity."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--install-scheduler" "Install an automated schedule (systemd/cron)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--uninstall-scheduler" "Remove an automated schedule."
     echo
-    echo -e "Use ${C_GREEN}--verbose${C_RESET} before any command for detailed live output (e.g., 'sudo $0 --verbose --diff')."
+    echo -e "${C_BOLD}${C_YELLOW}QUICK EXAMPLES:${C_RESET}"
+    echo -e "  Run a backup now:            ${C_GREEN}sudo $0${C_RESET}"
+    echo -e "  Verbose diff summary:        ${C_GREEN}sudo $0 --verbose --diff${C_RESET}"
+    echo -e "  Fix perms (interactive):     ${C_GREEN}sudo $0 --fix-permissions --test${C_RESET}"
+    echo
+    echo -e "Config: ${C_DIM}${CONFIG_FILE}${C_RESET}  Log: ${C_DIM}${LOG_FILE}${C_RESET}"
+    echo
+    echo -e "For full details, see the online documentation: \e]8;;${readme_url}\a${C_CYAN}README.md${C_RESET}\e]8;;\a"
     echo
 }
 
