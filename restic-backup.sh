@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.32 - 2025.09.27
+#         Restic Backup Script v0.33 - 2025.09.27
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.32"
+SCRIPT_VERSION="0.33"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -235,31 +235,46 @@ done
 # =================================================================
 
 display_help() {
+    local readme_url="https://github.com/buildplan/restic-backup-script/blob/main/README.md"
+    local prog
+    prog=$(basename "$0")
+
     echo -e "${C_BOLD}${C_CYAN}Restic Backup Script (v${SCRIPT_VERSION})${C_RESET}"
-    echo "A comprehensive script for managing encrypted, deduplicated backups with restic."
+    echo "Encrypted, deduplicated backups with restic."
     echo
     echo -e "${C_BOLD}${C_YELLOW}USAGE:${C_RESET}"
-    echo -e "  sudo $0 ${C_GREEN}[COMMAND]${C_RESET}"
+    echo -e "  sudo $prog ${C_GREEN}[options] [command]${C_RESET}"
+    echo
+    echo -e "${C_BOLD}${C_YELLOW}OPTIONS:${C_RESET}"
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--verbose" "Show detailed live output."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--fix-permissions" "Interactive only: auto-fix 600/400 on conf/secret."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--help, -h" "Display this help message."
     echo
     echo -e "${C_BOLD}${C_YELLOW}COMMANDS:${C_RESET}"
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "[no command]" "Run a standard backup and apply the retention policy."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--init" "Initialize a new restic repository (one-time setup)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--diff" "Show a summary of changes between the last two snapshots."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots" "List all available snapshots in the repository."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots-delete" "Interactively select and permanently delete specific snapshots."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--stats" "Display repository size, file counts, and stats."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check" "Verify repository integrity by checking a subset of data."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check-full" "Run a FULL, slow check verifying all repository data."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Manually apply the retention policy and prune old data."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--unlock" "Forcibly remove stale locks from the repository."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--restore" "Start the interactive restore wizard."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dry-run" "Preview backup changes without creating a new snapshot."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--test" "Validate configuration, permissions, and SSH connectivity."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--install-scheduler" "Install an automated backup schedule (systemd/cron)."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--uninstall-scheduler" "Remove an existing automated backup schedule."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--help, -h" "Display this help message."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots-delete" "Interactively select and permanently delete snapshots."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--stats" "Display repository size and file counts."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check" "Verify repository integrity (subset)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check-full" "Verify all repository data (slow)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Apply retention policy; optionally prune."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--unlock" "Remove stale repository locks."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--restore" "Interactive restore wizard."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dry-run" "Preview backup changes (no snapshot)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--test" "Validate config, permissions, connectivity."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--install-scheduler" "Install an automated schedule (systemd/cron)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--uninstall-scheduler" "Remove an automated schedule."
     echo
-    echo -e "Use ${C_GREEN}--verbose${C_RESET} before any command for detailed live output (e.g., 'sudo $0 --verbose --diff')."
+    echo -e "${C_BOLD}${C_YELLOW}QUICK EXAMPLES:${C_RESET}"
+    echo -e "  Run a backup now:            ${C_GREEN}sudo $prog${C_RESET}"
+    echo -e "  Verbose diff summary:        ${C_GREEN}sudo $prog --verbose --diff${C_RESET}"
+    echo -e "  Fix perms (interactive):     ${C_GREEN}sudo $prog --fix-permissions --test${C_RESET}"
+    echo
+    echo -e "Config: ${C_DIM}${CONFIG_FILE}${C_RESET}  Log: ${C_DIM}${LOG_FILE}${C_RESET}"
+    echo
+    echo -e "For full details, see the online documentation: \e]8;;${readme_url}\a${C_CYAN}README.md${C_RESET}\e]8;;\a"
     echo
 }
 
@@ -271,6 +286,14 @@ log_message() {
     if [[ "${VERBOSE_MODE:-false}" == "true" ]]; then
         echo -e "$message"
     fi
+}
+
+handle_crash() {
+    local exit_code=$?
+    local line_num=$1
+    log_message "FATAL: Script terminated unexpectedly on line $line_num with exit code $exit_code."
+    send_notification "Backup Crashed: $HOSTNAME" "x" \
+        "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly on line $line_num."
 }
 
 build_backup_command() {
@@ -446,6 +469,105 @@ send_discord() {
         "$DISCORD_WEBHOOK_URL" >/dev/null 2>>"$LOG_FILE"
 }
 
+send_teams() {
+    local title="$1"
+    local status="$2"
+    local message="$3"
+    if [[ "${TEAMS_ENABLED:-false}" != "true" ]] || [ -z "${TEAMS_WEBHOOK_URL:-}" ]; then
+        return 0
+    fi
+    local color
+    case "$status" in
+        success) color="good" ;;
+        warning) color="warning" ;;
+        failure) color="attention" ;;
+        *) color="default" ;;
+    esac
+    local escaped_title
+    escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
+    local escaped_message
+    escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+    local json_payload
+    printf -v json_payload '{
+      "type": "message",
+      "attachments": [{
+        "contentType": "application/vnd.microsoft.card.adaptive",
+        "content": {
+          "type": "AdaptiveCard",
+          "version": "1.4",
+          "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+          "body": [
+            {
+              "type": "TextBlock",
+              "text": "%s",
+              "weight": "bolder",
+              "size": "large",
+              "wrap": true,
+              "color": "%s"
+            },
+            {
+              "type": "TextBlock",
+              "text": "%s",
+              "wrap": true,
+              "separator": true
+            }
+          ],
+          "msteams": { "width": "full", "entities": [] }
+        }
+      }]
+    }' "$escaped_title" "$color" "$escaped_message"
+    curl -s --max-time 15 \
+        -H "Content-Type: application/json" \
+        -d "$json_payload" \
+        "$TEAMS_WEBHOOK_URL" >/dev/null 2>>"$LOG_FILE"
+}
+
+send_slack() {
+    local title="$1"
+    local status="$2" 
+    local message="$3"
+    if [[ "${SLACK_ENABLED:-false}" != "true" ]] || [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+        return 0
+    fi
+    local color
+    case "$status" in
+        success) color="#36a64f" ;;
+        warning) color="#ffa500" ;;
+        failure) color="#d50200" ;;
+        *) color="#808080" ;;
+    esac
+    local escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
+    local escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+    local json_payload
+    printf -v json_payload '{
+        "attachments": [
+            {
+                "color": "%s",
+                "blocks": [
+                    {
+                        "type": "header",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "%s"
+                        }
+                    },
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": "%s"
+                        }
+                    }
+                ]
+            }
+        ]
+    }' "$color" "$escaped_title" "$escaped_message"
+    curl -s --max-time 15 \
+        -H "Content-Type: application/json" \
+        -d "$json_payload" \
+        "$SLACK_WEBHOOK_URL" >/dev/null 2>>"$LOG_FILE"
+}
+
 send_notification() {
     local title="$1"
     local tags="$2"
@@ -454,6 +576,8 @@ send_notification() {
     local message="$5"
     send_ntfy "$title" "$tags" "$ntfy_priority" "$message"
     send_discord "$title" "$discord_status" "$message"
+    send_slack "$title" "$discord_status" "$message"
+    send_teams "$title" "$discord_status" "$message"
 }
 
 setup_environment() {
@@ -514,13 +638,46 @@ run_preflight_checks() {
         fi
         if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     fi
-    # Configuration Files
+
+    # --- Config Files Existence & Permissions Check ---
     if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Configuration Files${C_RESET}"; fi
+    if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Secure permissions on config file (600)..."; fi
+    local perms
+    perms=$(stat -c %a "$CONFIG_FILE" 2>/dev/null)
+    if [[ "$perms" != "600" ]]; then
+        echo -e "[${C_YELLOW} WARN ${C_RESET}]"
+        echo -e "${C_YELLOW}    ⚠️  Configuration file has insecure permissions ($perms), should be 600.${C_RESET}"
+        if [[ "${AUTO_FIX_PERMS}" == "true" ]]; then
+            if chmod 600 "$CONFIG_FILE"; then
+                echo -e "${C_GREEN}    ✅ Automatically corrected permissions to 600.${C_RESET}"
+            else
+                echo -e "${C_RED}    ❌ Failed to correct permissions.${C_RESET}"
+            fi
+        fi
+    else
+        if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
+    fi
+
+    # --- Password File Existence & Permissions Check ---
     if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Password file ('$RESTIC_PASSWORD_FILE')..."; fi
     if [ ! -r "$RESTIC_PASSWORD_FILE" ]; then
         handle_failure "Password file not found or not readable: $RESTIC_PASSWORD_FILE" "11"
     fi
-    if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
+    perms=$(stat -c %a "$RESTIC_PASSWORD_FILE" 2>/dev/null)
+    if [[ "$perms" != "400" ]]; then
+        echo -e "[${C_YELLOW} WARN ${C_RESET}]"
+        echo -e "${C_YELLOW}    ⚠️  Password file has insecure permissions ($perms), should be 400.${C_RESET}"
+        if [[ "${AUTO_FIX_PERMS}" == "true" ]]; then
+            if chmod 400 "$RESTIC_PASSWORD_FILE"; then
+                echo -e "${C_GREEN}    ✅ Automatically corrected permissions to 400.${C_RESET}"
+            else
+                echo -e "${C_RED}    ❌ Failed to correct permissions.${C_RESET}"
+            fi
+        fi
+    else
+        if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
+    fi
+    # --- Exclude File Check ---
     if [ -n "${EXCLUDE_FILE:-}" ]; then
         if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Exclude file ('$EXCLUDE_FILE')..."; fi
         if [ ! -r "$EXCLUDE_FILE" ]; then
@@ -528,11 +685,14 @@ run_preflight_checks() {
         fi
         if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     fi
+    
+    # --- Log File Check ---
     if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Log file writability ('$LOG_FILE')..."; fi
     if ! touch "$LOG_FILE" >/dev/null 2>&1; then
         handle_failure "The log file or its directory is not writable: ${LOG_FILE}" "15"
     fi
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
+
     # Repository State
     if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Repository State${C_RESET}"; fi
     if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Repository connectivity and credentials..."; fi
@@ -658,7 +818,6 @@ run_install_scheduler() {
             local hour1=${time1%%:*} min1=${time1##*:}
             local hour2=${time2%%:*} min2=${time2##*:}
             printf -v systemd_schedule "*-*-* %s:%s:00\n*-*-* %s:%s:00" "$hour1" "$min1" "$hour2" "$min2"
-            systemd_schedule="*-*-* ${hour1}:${min1}:00\n*-*-* ${hour2}:${min2}:00"
             printf -v cron_schedule "%s %s * * *\n%s %s * * *" "$min1" "$hour1" "$min2" "$hour2"
             ;;
         3)
@@ -996,7 +1155,7 @@ run_restore() {
     read -p "Enter snapshot ID to restore (or 'latest'): " snapshot_id
     if [ -z "$snapshot_id" ]; then
         echo "No snapshot specified, exiting"
-        return 1
+        return 0
     fi
     local list_confirm
     read -p "Would you like to list the contents of this snapshot to find exact paths? (y/n): " list_confirm
@@ -1007,13 +1166,13 @@ run_restore() {
     read -p "Enter restore destination (absolute path): " restore_dest
     if [[ -z "$restore_dest" || "$restore_dest" != /* ]]; then
         echo -e "${C_RED}Error: Must be a non-empty, absolute path. Aborting.${C_RESET}" >&2
-        return 1
+        return 0
     fi
     if [[ "$restore_dest" == "/" || "$restore_dest" == "/etc" || "$restore_dest" == "/usr" ]]; then
         read -p "${C_RED}WARNING: You are restoring to a critical system directory ('$restore_dest')${C_RESET}. This is highly unusual and could damage your system. Are you absolutely sure? (y/n): " confirm_dangerous_restore
         if [[ "${confirm_dangerous_restore,,}" != "y" ]]; then
             echo "Restore cancelled."
-            return 1
+            return 0
         fi
     fi
     local include_paths=()
@@ -1101,7 +1260,7 @@ run_snapshots_delete() {
     read -p "Enter snapshot ID(s) to delete, separated by spaces: " -a ids_to_delete
     if [ ${#ids_to_delete[@]} -eq 0 ]; then
         echo "No snapshot IDs entered. Aborting."
-        return 1
+        return 0
     fi
     echo -e "\nYou have selected the following ${C_YELLOW}${#ids_to_delete[@]} snapshot(s)${C_RESET} for deletion:"
     for id in "${ids_to_delete[@]}"; do
@@ -1145,25 +1304,63 @@ run_snapshots_delete() {
 # MAIN SCRIPT EXECUTION
 # =================================================================
 
-check_for_script_update
-check_and_install_restic
-trap cleanup EXIT
-trap 'log_message "FATAL: Script terminated unexpectedly on line $LINENO. Sending crash notification."; send_notification "Backup Crashed: $HOSTNAME" "x" "${NTFY_PRIORITY_FAILURE}" "failure" "Backup script terminated unexpectedly on line $LINENO."' ERR
+# 1. Parse flags.
 VERBOSE_MODE=false
-if [[ "${1:-}" == "--verbose" ]]; then
-    VERBOSE_MODE=true
-    shift
-fi
+AUTO_FIX_PERMS=${AUTO_FIX_PERMS:-false}
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --verbose)
+      VERBOSE_MODE=true
+      shift
+      ;;
+    --fix-permissions)
+      if ! [ -t 1 ]; then
+        echo -e "${C_RED}ERROR: The --fix-permissions flag can only be used in an interactive session.${C_RESET}" >&2
+        exit 1
+      fi
+      AUTO_FIX_PERMS=true
+      shift
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+# 2. Set traps.
+trap 'handle_crash $LINENO' ERR
+trap cleanup EXIT
+
+# 3. Acquire the lock.
 exec 200>"$LOCK_FILE"
 if ! flock -n 200; then
     echo -e "${C_RED}Another backup is already running${C_RESET}" >&2
     exit 5
 fi
 LOCK_FD=200
+
+# 4. After lock, it's safe to run updates.
+check_for_script_update
+check_and_install_restic
+
+# 5. Prepare the environment and run final pre-flight checks.
 setup_environment
 rotate_log
 
-# Handle different modes
+# Handle the --fix-permissions and AUTO_FIX_PERMS config for non-interactive mode
+if [[ "${AUTO_FIX_PERMS}" == "true" ]]; then
+    if ! [ -t 1 ]; then
+        log_message "AUTO_FIX_PERMS=true ignored in non-interactive mode for safety."
+        echo -e "${C_YELLOW}WARNING: AUTO_FIX_PERMS is enabled but ignored in non-interactive mode for safety.${C_RESET}"
+        AUTO_FIX_PERMS=false
+    fi
+fi
+
+# 6. Execute the requested command.
 case "${1:-}" in
     --install-scheduler)
         run_install_scheduler

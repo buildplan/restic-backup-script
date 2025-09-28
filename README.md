@@ -9,42 +9,43 @@ This script automates encrypted, deduplicated backups of local directories to a 
 
 ## Features
 
-  - **Client-Side Encryption**: All data is encrypted on your server *before* being uploaded, ensuring zero-knowledge privacy from the storage provider.
-  - **Deduplication & Compression**: Saves significant storage space by only storing unique data blocks and applying compression.
-  - **Snapshot-Based Backups**: Creates point-in-time snapshots, allowing you to easily browse and restore files from any backup date.
-  - **Advanced Retention Policies**: Sophisticated rules to automatically keep daily, weekly, monthly, and yearly snapshots.
-  - **Unified Configuration**: All settings are managed in a single, easy-to-edit `restic-backup.conf` file.
-  - **Notification Support**: Sends detailed success, warning, or failure notifications to ntfy and/or Discord.
-  - **System Friendly**: Uses `nice` and `ionice` to minimize CPU and I/O impact during backups.
-  - **Multiple Operation Modes**: Supports standard backups, dry runs, integrity checks, difference summaries, and a safe, interactive restore mode. 
-  - **Concurrency Control & Logging**: Prevents multiple instances from running simultaneously and handles its own log rotation.
-  - **Pre-run Validation**: Performs checks for required commands and repository connectivity before execution.
-  - **Cron Job Monitoring**: Optional integration with [Healthchecks.io](https://healthchecks.io) for alerts if a backup job fails to run on schedule.
+- **Client-Side Encryption**: All data is encrypted on your server *before* being uploaded, ensuring zero-knowledge privacy from the storage provider.
+- **Deduplication & Compression**: Saves significant storage space by only storing unique data blocks and applying compression.
+- **Snapshot-Based Backups**: Creates point-in-time snapshots, allowing you to easily browse and restore files from any backup date.
+- **Advanced Retention Policies**: Sophisticated rules to automatically keep daily, weekly, monthly, and yearly snapshots.
+- **Unified Configuration**: All settings are managed in a single, easy-to-edit `restic-backup.conf` file.
+- **Notification Support**: Sends detailed success, warning, or failure notifications to ntfy, Discord, Slack, and Microsoft Teams.
+- **Flexible File Exclusions**: Exclude files and directories using either a dedicated exclusion file or by listing patterns directly in the configuration.
+- **System Friendly**: Uses `nice` and `ionice` to minimize CPU and I/O impact during backups.
+- **Multiple Operation Modes**: Supports standard backups, dry runs, integrity checks, difference summaries, and a safe, interactive restore mode.
+- **Concurrency Control & Logging**: Prevents multiple instances from running simultaneously and handles its own log rotation.
+- **Pre-run Validation**: Performs checks for required commands and repository connectivity before execution.
+- **Cron Job Monitoring**: Optional integration with [Healthchecks.io](https://healthchecks.io) for alerts if a backup job fails to run on schedule.
 
 -----
 
 ## Usage
 
-#### Run Modes:
+### Run Modes
 
-  - `sudo ./restic-backup.sh` - Run a standard backup silently (suitable for cron).
-  - `sudo ./restic-backup.sh --verbose` - Run with live progress and detailed output.
-  - `sudo ./restic-backup.sh --dry-run` - Preview changes without creating a new snapshot.
-  - `sudo ./restic-backup.sh --check` - Verify repository integrity by checking a subset of data.
-  - `sudo ./restic-backup.sh --check-full` - Run a full check verifying all repository data.
-  - `sudo ./restic-backup.sh --test` - Validate configuration, permissions, and SSH connectivity.
-  - `sudo ./restic-backup.sh --install-scheduler` - Run the interactive wizard to set up an automated backup schedule (systemd/cron).
-  - `sudo ./restic-backup.sh --uninstall-scheduler` - Remove a schedule created by the wizard.
-  - `sudo ./restic-backup.sh --restore` - Start the interactive restore wizard.
-  - `sudo ./restic-backup.sh --forget` - Manually apply the retention policy and prune old data.
-  - `sudo ./restic-backup.sh --diff` - Show a summary of changes between the last two snapshots. 
-  - `sudo ./restic-backup.sh --stats` - Display repository size, file counts, and stats.
-  - `sudo ./restic-backup.sh --unlock` - Forcibly remove stale locks from the repository.
-  - `sudo ./restic-backup.sh --snapshots` - List all available snapshots in the repository.
-  - `sudo ./restic-backup.sh --snapshots-delete` - Permanently delete specific snapshots.
-  - `sudo ./restic-backup.sh --init` - (One-time setup) Initialize the remote repository.
-  - `sudo ./restic-backup.sh --help` - Displays help and all the flags.
-
+- `sudo ./restic-backup.sh` - Run a standard backup silently (suitable for cron).
+- `sudo ./restic-backup.sh --verbose` - Run with live progress and detailed output.
+- `sudo ./restic-backup.sh --dry-run` - Preview changes without creating a new snapshot.
+- `sudo ./restic-backup.sh --check` - Verify repository integrity by checking a subset of data.
+- `sudo ./restic-backup.sh --check-full` - Run a full check verifying all repository data.
+- `sudo ./restic-backup.sh --test` - Validate configuration, permissions, and SSH connectivity.
+- `sudo ./restic-backup.sh --fix-permissions --test` - Run tests and interactively auto-correct insecure file permissions.
+- `sudo ./restic-backup.sh --install-scheduler` - Run the interactive wizard to set up an automated backup schedule (systemd/cron).
+- `sudo ./restic-backup.sh --uninstall-scheduler` - Remove a schedule created by the wizard.
+- `sudo ./restic-backup.sh --restore` - Start the interactive restore wizard.
+- `sudo ./restic-backup.sh --forget` - Manually apply the retention policy and prune old data.
+- `sudo ./restic-backup.sh --diff` - Show a summary of changes between the last two snapshots.
+- `sudo ./restic-backup.sh --stats` - Display repository size, file counts, and stats.
+- `sudo ./restic-backup.sh --unlock` - Forcibly remove stale locks from the repository.
+- `sudo ./restic-backup.sh --snapshots` - List all available snapshots in the repository.
+- `sudo ./restic-backup.sh --snapshots-delete` - Permanently delete specific snapshots.
+- `sudo ./restic-backup.sh --init` - (One-time setup) Initialize the remote repository.
+- `sudo ./restic-backup.sh --help` - Displays help and all the flags.
 
 > *Default log location: `/var/log/restic-backup.log`*
 
@@ -52,15 +53,15 @@ This script automates encrypted, deduplicated backups of local directories to a 
 
 The script uses specific exit codes for different failures to help with debugging automated runs.
 
-  - **Exit Code `1`:** A fatal configuration error, such as a missing `restic-backup.conf` file or required variable.
-  - **Exit Code `5`:** Lock contention; another instance of the script is already running.
-  - **Exit Code `10`:** A required command (like `restic` or `curl`) is not installed.
-  - **Exit Code `11`:** The `RESTIC_PASSWORD_FILE` cannot be found.
-  - **Exit Code `12`:** The script cannot connect to or access the Restic repository.
-  - **Exit Code `13`:** A source directory in `BACKUP_SOURCES` does not exist or is not readable.
-  - **Exit Code `14`:** The `EXCLUDE_FILE` is not readable.
-  - **Exit Code `15`:** The `LOG_FILE` is not writable.
-  - **Exit Code `20`:** The `restic init` command failed.
+- **Exit Code `1`:** A fatal configuration error, such as a missing `restic-backup.conf` file or required variable.
+- **Exit Code `5`:** Lock contention; another instance of the script is already running.
+- **Exit Code `10`:** A required command (like `restic` or `curl`) is not installed.
+- **Exit Code `11`:** The `RESTIC_PASSWORD_FILE` cannot be found.
+- **Exit Code `12`:** The script cannot connect to or access the Restic repository.
+- **Exit Code `13`:** A source directory in `BACKUP_SOURCES` does not exist or is not readable.
+- **Exit Code `14`:** The `EXCLUDE_FILE` is not readable.
+- **Exit Code `15`:** The `LOG_FILE` is not writable.
+- **Exit Code `20`:** The `restic init` command failed.
 
 -----
 
@@ -68,7 +69,7 @@ The script uses specific exit codes for different failures to help with debuggin
 
 All files should be placed in a single directory (e.g., `/root/scripts/backup`).
 
-```
+```bash
 /root/scripts/backup/
 ├── restic-backup.sh      (main script)
 ├── restic-backup.conf    (settings and credentials)
@@ -103,7 +104,7 @@ sudo apt-get update && sudo apt-get install -y restic jq gnupg curl bzip2 util-l
 sudo dnf install -y restic jq gnupg curl bzip2 util-linux coreutils less
 ```
 
-You could also download and install the latest version of `restic`. 
+You could also download and install the latest version of `restic`.
 
 **Note:** While `restic` can be installed from your system's package manager, it is often an older version. It is **recommended** to install it manually or allow the script's built-in auto-updater to fetch the latest [official version](https://github.com/restic/restic/releases) for you.
 
@@ -138,12 +139,13 @@ sudo mv restic_* /usr/local/bin/restic
 | **`coreutils`** | Provides essential commands used throughout the script, such as `date`, `grep`, `sed`, `chmod`, `mv`, and `mktemp`. |
 | **`less`** | Paging through the list of files during an interactive restore (`--restore` mode).                         |
 
+-----
 
 ### 2. Configure Passwordless SSH Login (Recommended)
 
 The most reliable way for the script to connect to a remote server is via an SSH config file.
 
-1.  **Generate a root SSH key** if one doesn't already exist:
+1. **Generate a root SSH key** if one doesn't already exist:
 
     ```sh
     sudo ssh-keygen -t ed25519
@@ -151,18 +153,18 @@ The most reliable way for the script to connect to a remote server is via an SSH
 
     (Press Enter through all prompts).
 
-2.  **Add your public key** to the remote server's authorized keys. For a Hetzner Storage Box, you can paste the contents of `sudo cat /root/.ssh/id_ed25519.pub` into the control panel.
+2. **Add your public key** to the remote server's authorized keys. For a Hetzner Storage Box, you can paste the contents of `sudo cat /root/.ssh/id_ed25519.pub` into the control panel.
 
-3.  **Create an SSH config file** to define an alias for your connection:
+3. **Create an SSH config file** to define an alias for your connection:
 
     ```sh
     # Open the file in an editor
     sudo nano /root/.ssh/config
     ```
 
-4.  **Add the following content**, adjusting the details for your server:
+4. **Add the following content**, adjusting the details for your server:
 
-    ```
+    ```bash
     Host storagebox
         HostName u123456.your-storagebox.de
         User u123456-sub4
@@ -172,7 +174,7 @@ The most reliable way for the script to connect to a remote server is via an SSH
         ServerAliveCountMax 240
     ```
 
-5.  **Set secure permissions** and test the connection:
+5. **Set secure permissions** and test the connection:
 
     ```sh
     sudo chmod 600 /root/.ssh/config
@@ -183,13 +185,13 @@ The most reliable way for the script to connect to a remote server is via an SSH
 
 ### 3. Place and Configure Files
 
-1.  Create your script directory:
+1. Create your script directory:
 
     ```sh
     mkdir -p /root/scripts/backup && cd /root/scripts/backup
     ```
 
-2.  Download the script, configuration, and excludes files from the repository:
+2. Download the script, configuration, and excludes files from the repository:
 
     ```sh
     # Download the main script
@@ -202,25 +204,70 @@ The most reliable way for the script to connect to a remote server is via an SSH
     curl -LO https://github.com/buildplan/restic-backup-script/raw/refs/heads/main/restic-excludes.txt
     ```
 
-3.  **Make the script executable**:
+3. **Make the script executable**:
 
     ```sh
     chmod +x restic-backup.sh
     ```
 
-4.  **Set secure permissions** for your configuration file:
+4. **Set secure permissions** for your configuration file:
 
     ```sh
     chmod 600 restic-backup.conf
     ```
 
-5.  **Edit `restic-backup.conf` and `restic-excludes.txt`** to specify your repository path, source directories, notification settings, and exclusion patterns.
+5. **Edit `restic-backup.conf` and `restic-excludes.txt`** to specify your repository path, source directories, notification settings, and exclusion patterns.
+
+### Configuration (`restic-backup.conf`)
+
+All script behavior is controlled by the `restic-backup.conf` file. Below is an overview of the key settings available.
+
+#### Core Settings
+
+- `RESTIC_REPOSITORY`: The connection string for your remote storage.
+- `RESTIC_PASSWORD_FILE`: The absolute path to the file containing your repository's encryption password.
+- `BACKUP_SOURCES`: A list of local directories to back up. Use Bash array syntax `("/path/one" "/path/two")` to handle spaces correctly.
+
+#### Retention Policy
+
+You can define how many snapshots to keep for various timeframes. The script will automatically remove older snapshots that fall outside these rules.
+
+- `KEEP_LAST`: Number of the most recent snapshots to keep.
+- `KEEP_DAILY`: Number of daily snapshots to keep.
+- `KEEP_WEEKLY`: Number of weekly snapshots to keep.
+- `KEEP_MONTHLY`: Number of monthly snapshots to keep.
+- `KEEP_YEARLY`: Number of yearly snapshots to keep.
+
+#### Notifications
+
+The script can send detailed status notifications to multiple services. Each can be enabled or disabled individually.
+
+- `NTFY_ENABLED`: Set to `true` to enable ntfy notifications.
+- `DISCORD_ENABLED`: Set to `true` to enable Discord notifications.
+- `SLACK_ENABLED`: Set to `true` to enable Slack notifications.
+- `TEAMS_ENABLED`: Set to `true` to enable Microsoft Teams notifications.
+- You must also provide the corresponding `_URL` and `_TOKEN` for each service you enable.
+
+#### Exclusions
+
+You have two ways to exclude files and directories from your backups:
+
+1. **`EXCLUDE_FILE`**: Point this to a text file (like `restic-excludes.txt`) containing one exclusion pattern per line.
+2. **`EXCLUDE_PATTERNS`**: A space-separated list of patterns to exclude directly in the configuration file (e.g., `*.tmp *.log`).
+
+#### Performance and Maintenance
+
+- `LOW_PRIORITY`: Set to `true` to run the backup with lower CPU (`nice`) and I/O (`ionice`) priority, minimizing impact on other services.
+- `CHECK_AFTER_BACKUP`: Set to `true` to automatically run a repository integrity check after each successful backup.
+- `PRUNE_AFTER_FORGET`: Set to `true` to automatically prune the repository after applying the retention policy, which frees up storage space.
+
+-----
 
 ### 4. Initial Repository Setup
 
 Before the first backup, you need to create the repository password file and initialize the remote repository.
 
-1.  **Create the password file.** This stores the encryption key for your repository. **Guard this file carefully!**
+1. **Create the password file.** This stores the encryption key for your repository. **Guard this file carefully!**
 
     ```sh
     # Replace 'your-very-secure-password' with a strong, unique password
@@ -230,7 +277,7 @@ Before the first backup, you need to create the repository password file and ini
     sudo chmod 400 /root/.restic-password
     ```
 
-2.  **Initialize the repository.** Run the script with the `--init` flag:
+2. **Initialize the repository.** Run the script with the `--init` flag:
 
     ```sh
     # Navigate to your script directory
@@ -244,12 +291,14 @@ Before the first backup, you need to create the repository password file and ini
 
 The easiest and most reliable way to schedule your backups is to use the script's built-in interactive wizard. It will guide you through creating and enabling either a modern `systemd timer` (recommended) or a traditional `cron job`.
 
-1.  Navigate to your script directory:
+1. Navigate to your script directory:
+
     ```sh
     cd /root/scripts/backup
     ```
 
-2.  Run the scheduler installation wizard:
+2. Run the scheduler installation wizard:
+
     ```sh
     sudo ./restic-backup.sh --install-scheduler
     ```
@@ -262,13 +311,13 @@ If you prefer to manage the schedule manually instead of using the wizard, you c
 
 To run the backup automatically, edit the root crontab.
 
-1.  Open the crontab editor:
+1. Open the crontab editor:
 
     ```sh
     sudo crontab -e
     ```
 
-2.  Add the following lines to schedule your backups and maintenance. 
+2. Add the following lines to schedule your backups and maintenance.
 
     ```crontab
     # Define a safe PATH that includes the location of restic
@@ -284,6 +333,7 @@ To run the backup automatically, edit the root crontab.
     0 3 * * 0 [ $(date +\%d) -le 07 ] && /root/scripts/backup/restic-backup.sh --check-full > /dev/null 2>&1
 
     ```
+
     *For pune job in your `restic-backup.conf`, set `PRUNE_AFTER_FORGET=true`.*  
     *For more details on how forget flag work, see the [official Restic documentation on removing snapshots](https://restic.readthedocs.io/en/stable/060_forget.html).*  
     *Redirecting output to `/dev/null` is recommended, as the script handles its own logging and notifications.*
