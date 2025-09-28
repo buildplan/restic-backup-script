@@ -589,6 +589,9 @@ setup_environment() {
     if [ -n "${GOMAXPROCS_LIMIT:-}" ]; then
         export GOMAXPROCS="${GOMAXPROCS_LIMIT}"
     fi
+    if [[ "${VERBOSE_MODE:-false}" == "true" ]] && [ -t 1 ]; then
+        export RESTIC_PROGRESS_FPS="4"
+    fi
     if [ -n "${RESTIC_CACHE_DIR:-}" ]; then
         export RESTIC_CACHE_DIR
         mkdir -p "$RESTIC_CACHE_DIR"
