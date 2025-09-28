@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.33 - 2025.09.27
+#         Restic Backup Script v0.34 - 2025.09.27
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.33"
+SCRIPT_VERSION="0.34"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -195,9 +195,9 @@ check_for_script_update() {
         return 1
     fi
     echo -e "${C_GREEN}✅ Checksum verified successfully.${C_RESET}"
-    if ! grep -q "#!/bin/bash" "$temp_script"; then
-         echo -e "${C_RED}Downloaded file does not appear to be a valid script. Aborting update.${C_RESET}" >&2
-         return 1
+    if ! grep -q -E "^#!/(usr/)?bin/(env )?bash" "$temp_script"; then
+        echo -e "${C_RED}Downloaded file does not appear to be a valid script. Aborting update.${C_RESET}" >&2
+        return 1
     fi
     chmod +x "$temp_script"
     mv "$temp_script" "$0"
@@ -301,7 +301,12 @@ build_backup_command() {
     [ "${LOG_LEVEL:-1}" -le 0 ] && cmd+=(--quiet)
     [ "${LOG_LEVEL:-1}" -ge 2 ] && cmd+=(--verbose)
     [ "${LOG_LEVEL:-1}" -ge 3 ] && cmd+=(--verbose)
+    if [ -n "${SFTP_CONNECTIONS:-}" ]; then
+        cmd+=(-o "sftp.connections=${SFTP_CONNECTIONS}")
+    fi
     cmd+=(backup)
+    [ -n "${LIMIT_THREADS:-}" ] && cmd+=(--limit-threads "${LIMIT_THREADS}")
+    [ -n "${LIMIT_UPLOAD:-}" ] && cmd+=(--limit-upload "${LIMIT_UPLOAD}")
     [ -n "${BACKUP_TAG:-}" ] && cmd+=(--tag "$BACKUP_TAG")
     [ -n "${COMPRESSION:-}" ] && cmd+=(--compression "$COMPRESSION")
     [ -n "${PACK_SIZE:-}" ] && cmd+=(--pack-size "$PACK_SIZE")
@@ -583,6 +588,9 @@ send_notification() {
 setup_environment() {
     export RESTIC_REPOSITORY
     export RESTIC_PASSWORD_FILE
+    if [ -n "${GOMAXPROCS_LIMIT:-}" ]; then
+        export GOMAXPROCS="${GOMAXPROCS_LIMIT}"
+    fi
     if [ -n "${RESTIC_CACHE_DIR:-}" ]; then
         export RESTIC_CACHE_DIR
         mkdir -p "$RESTIC_CACHE_DIR"
@@ -638,7 +646,19 @@ run_preflight_checks() {
         fi
         if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     fi
-
+    # --- Performance Settings Validation ---
+    if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Performance Settings${C_RESET}"; fi
+    local numeric_vars=("GOMAXPROCS_LIMIT" "LIMIT_THREADS" "LIMIT_UPLOAD" "SFTP_CONNECTIONS")
+    for var in "${numeric_vars[@]}"; do
+        local value="${!var:-}"
+        if [[ -n "$value" ]]; then
+            if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Validating ${var} ('${value}')..."; fi
+            if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+                handle_failure "${var} must be a positive integer, but got: '${value}'"
+            fi
+            if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
+        fi
+    done
     # --- Config Files Existence & Permissions Check ---
     if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Configuration Files${C_RESET}"; fi
     if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Secure permissions on config file (600)..."; fi
