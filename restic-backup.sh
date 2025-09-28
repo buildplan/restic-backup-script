@@ -1298,6 +1298,7 @@ if [[ "${1:-}" == "--verbose" ]]; then
     VERBOSE_MODE=true
     shift
 fi
+
 if [[ "${1:-}" == "--fix-permissions" ]]; then
     if ! [ -t 1 ]; then
         echo -e "${C_RED}ERROR: The --fix-permissions flag can only be used in an interactive session.${C_RESET}" >&2
@@ -1306,6 +1307,11 @@ if [[ "${1:-}" == "--fix-permissions" ]]; then
     AUTO_FIX_PERMS=true
     shift
 fi
+if [[ "${AUTO_FIX_PERMS:-false}" == "true" && ! -t 1 ]]; then
+    echo -e "${C_YELLOW}WARNING: AUTO_FIX_PERMS=true is ignored in non-interactive mode for safety.${C_RESET}"
+    AUTO_FIX_PERMS=false
+fi
+
 exec 200>"$LOCK_FILE"
 if ! flock -n 200; then
     echo -e "${C_RED}Another backup is already running${C_RESET}" >&2
