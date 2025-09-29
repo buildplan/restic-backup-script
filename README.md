@@ -195,13 +195,13 @@ The most reliable way for the script to connect to a remote server is via an SSH
 
     ```sh
     # Download the main script
-    curl -LO https://github.com/buildplan/restic-backup-script/raw/refs/heads/main/restic-backup.sh
+    curl -LO https://raw.githubusercontent.com/buildplan/restic-backup-script/refs/heads/main/restic-backup.sh
 
     # Download the configuration template
-    curl -LO https://github.com/buildplan/restic-backup-script/raw/refs/heads/main/restic-backup.conf
+    curl -LO https://raw.githubusercontent.com/buildplan/restic-backup-script/refs/heads/main/restic-backup.conf
 
     # Download the excludes list
-    curl -LO https://github.com/buildplan/restic-backup-script/raw/refs/heads/main/restic-excludes.txt
+    curl -LO https://raw.githubusercontent.com/buildplan/restic-backup-script/refs/heads/main/restic-excludes.txt
     ```
 
 3. **Make the script executable**:
