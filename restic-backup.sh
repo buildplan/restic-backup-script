@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.35 - 2025.09.28
+#         Restic Backup Script v0.36 - 2025.09.29
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.35"
+SCRIPT_VERSION="0.36"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -586,9 +586,17 @@ send_notification() {
 setup_environment() {
     export RESTIC_REPOSITORY
     export RESTIC_PASSWORD_FILE
+
     if [ -n "${GOMAXPROCS_LIMIT:-}" ]; then
         export GOMAXPROCS="${GOMAXPROCS_LIMIT}"
     fi
+
+    # Enable progress bar for interactive --verbose runs
+    if [[ "${VERBOSE_MODE:-false}" == "true" ]] && [ -t 1 ]; then
+        local fps_rate="${PROGRESS_FPS_RATE:-4}"
+        export RESTIC_PROGRESS_FPS="${fps_rate}"
+    fi
+
     if [ -n "${RESTIC_CACHE_DIR:-}" ]; then
         export RESTIC_CACHE_DIR
         mkdir -p "$RESTIC_CACHE_DIR"
