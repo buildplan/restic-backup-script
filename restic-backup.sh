@@ -78,16 +78,13 @@ display_update_info() {
     local current_version="$2"
     local new_version="$3"
     local release_notes="$4"
-
-    echo # Add a blank line for spacing
+    echo
     echo -e "${C_BOLD}${C_YELLOW}A new version of ${component_name} is available!${C_RESET}"
     printf '  %-18s %s\n' "${C_CYAN}Current Version:${C_RESET}" "${current_version:--not installed-}"
     printf '  %-18s %s\n' "${C_GREEN}New Version:${C_RESET}"     "$new_version"
     echo
-
     if [ -n "$release_notes" ]; then
         echo -e "${C_YELLOW}Release Notes for v${new_version}:${C_RESET}"
-        # This formats the release notes with a nice indentation
         echo -e "    ${release_notes//$'\n'/$'\n'    }"
         echo
     fi
@@ -317,6 +314,9 @@ display_help() {
     echo -e "  Run a backup now:            ${C_GREEN}sudo $prog${C_RESET}"
     echo -e "  Verbose diff summary:        ${C_GREEN}sudo $prog --verbose --diff${C_RESET}"
     echo -e "  Fix perms (interactive):     ${C_GREEN}sudo $prog --fix-permissions --test${C_RESET}"
+    echo
+    echo -e "${C_BOLD}${C_YELLOW}DEPENDENCIES:${C_RESET}"
+    echo -e "  This script requires: ${C_GREEN}restic, curl, gpg, bzip2, jq, flock${C_RESET}"
     echo
     echo -e "Config: ${C_DIM}${CONFIG_FILE}${C_RESET}  Log: ${C_DIM}${LOG_FILE}${C_RESET}"
     echo
@@ -682,22 +682,15 @@ run_preflight_checks() {
     # System Dependencies
     if [[ "$verbosity" == "verbose" ]]; then
         echo -e "\n  ${C_DIM}- Checking System Dependencies${C_RESET}"
-        printf "     %-65s" "Required commands (restic, curl, flock)..."
+        printf "     %-65s" "Required commands (restic, curl, flock, jq)..."
     fi
-    local required_cmds=(restic curl flock)
+    local required_cmds=(restic curl flock jq)
     for cmd in "${required_cmds[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then
             handle_failure "Required command '$cmd' not found." "10"
         fi
     done
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
-    if [[ "$mode" == "diff" ]]; then
-        if [[ "$verbosity" == "verbose" ]]; then printf "     %-65s" "jq command for --diff..."; fi
-        if ! command -v jq &>/dev/null; then
-            handle_failure "'jq' is required for the --diff command. Install on Debian based system with sudo apt install jq" "10"
-        fi
-        if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
-    fi
     # --- Performance Settings Validation ---
     if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Performance Settings${C_RESET}"; fi
     local numeric_vars=("GOMAXPROCS_LIMIT" "LIMIT_THREADS" "LIMIT_UPLOAD" "SFTP_CONNECTIONS")
