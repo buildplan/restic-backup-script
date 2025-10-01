@@ -316,7 +316,7 @@ display_help() {
     echo -e "  Fix perms (interactive):     ${C_GREEN}sudo $prog --fix-permissions --test${C_RESET}"
     echo
     echo -e "${C_BOLD}${C_YELLOW}DEPENDENCIES:${C_RESET}"
-    echo -e "  This script requires: ${C_GREEN}restic, curl, gpg, bzip2, jq, flock${C_RESET}"
+    echo -e "  This script requires: ${C_GREEN}restic, curl, gpg, bzip2, less, jq, flock${C_RESET}"
     echo
     echo -e "Config: ${C_DIM}${CONFIG_FILE}${C_RESET}  Log: ${C_DIM}${LOG_FILE}${C_RESET}"
     echo
@@ -682,12 +682,18 @@ run_preflight_checks() {
     # System Dependencies
     if [[ "$verbosity" == "verbose" ]]; then
         echo -e "\n  ${C_DIM}- Checking System Dependencies${C_RESET}"
-        printf "     %-65s" "Required commands (restic, curl, flock, jq)..."
+        printf "     %-65s" "Required commands (restic, curl, gpg, bzip2, less, flock, jq)..."
     fi
-    local required_cmds=(restic curl flock jq)
+    local required_cmds=(restic curl flock jq less gpg bzip2)
     for cmd in "${required_cmds[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then
-            handle_failure "Required command '$cmd' not found." "10"
+            local install_hint="On Debian-based systems, try: sudo apt install $cmd"
+            case "$cmd" in
+                gpg) install_hint="On Debian-based systems, try: sudo apt install gnupg";;
+                bzip2) install_hint="On Debian-based systems, try: sudo apt install bzip2";;
+                less) install_hint="On Debian-based systems, try: sudo apt install less";;
+            esac
+            handle_failure "Required command '$cmd' not found. $install_hint" "10"
         fi
     done
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
