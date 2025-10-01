@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.37 - 2025.10.01
+#         Restic Backup Script v0.36 - 2025.09.29
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.37"
+SCRIPT_VERSION="0.36"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -73,43 +73,17 @@ import_restic_key() {
     return 1
 }
 
-display_update_info() {
-    local component_name="$1"
-    local current_version="$2"
-    local new_version="$3"
-    local release_notes="$4"
-    echo
-    echo -e "${C_BOLD}${C_YELLOW}A new version of ${component_name} is available!${C_RESET}"
-    printf '  %-18s %s\n' "${C_CYAN}Current Version:${C_RESET}" "${current_version:--not installed-}"
-    printf '  %-18s %s\n' "${C_GREEN}New Version:${C_RESET}"     "$new_version"
-    echo
-    if [ -n "$release_notes" ]; then
-        echo -e "${C_YELLOW}Release Notes for v${new_version}:${C_RESET}"
-        echo -e "    ${release_notes//$'\n'/$'\n'    }"
-        echo
-    fi
-}
-
 check_and_install_restic() {
     echo -e "${C_BOLD}--- Checking Restic Version ---${C_RESET}"
-    if ! command -v bzip2 &>/dev/null || ! command -v curl &>/dev/null || ! command -v gpg &>/dev/null || ! command -v jq &>/dev/null; then
-        echo
-        echo -e "${C_RED}ERROR: 'less', 'bzip2', 'curl', 'gpg', and 'jq' are required for secure auto-installation.${C_RESET}" >&2
-        echo
-        echo -e "${C_YELLOW}On Debian based systems install with: sudo apt-get install less bzip2 curl gnupg jq${C_RESET}" >&2
-        echo
+    if ! command -v bzip2 &>/dev/null || ! command -v curl &>/dev/null || ! command -v gpg &>/dev/null; then
+        echo -e "${C_RED}ERROR: 'bzip2', 'curl', and 'gpg' are required for secure auto-installation.${C_RESET}" >&2
+        echo -e "${C_YELLOW}On Debian based systems install with: sudo apt-get install bzip2 curl gnupg${C_RESET}" >&2
         exit 1
     fi
-    local release_info
-    release_info=$(curl -s "https://api.github.com/repos/restic/restic/releases/latest")
-    if [ -z "$release_info" ]; then
-        echo -e "${C_YELLOW}Could not fetch latest restic version info from GitHub. Skipping check.${C_RESET}"
-        return 0
-    fi
     local latest_version
-    latest_version=$(echo "$release_info" | jq -r '.tag_name | sub("^v"; "")')
+    latest_version=$(curl -s "https://api.github.com/repos/restic/restic/releases/latest" | grep -o '"tag_name": "[^"]*"' | sed -E 's/.*"v?([^"]+)".*/\1/')
     if [ -z "$latest_version" ]; then
-        echo -e "${C_YELLOW}Could not parse latest restic version from GitHub. Skipping check.${C_RESET}"
+        echo -e "${C_YELLOW}Could not fetch latest restic version from GitHub. Skipping check.${C_RESET}"
         return 0
     fi
     local local_version=""
@@ -120,11 +94,7 @@ check_and_install_restic() {
         echo -e "${C_GREEN}✅ Restic is up to date (version $local_version).${C_RESET}"
         return 0
     fi
-
-    local release_notes
-    release_notes=$(echo "$release_info" | jq -r '.body')
-    display_update_info "Restic" "$local_version" "$latest_version" "$release_notes"
-
+    echo -e "${C_YELLOW}A new version of Restic is available ($latest_version). Current version is ${local_version:-not installed}.${C_RESET}"
     if [ -t 1 ]; then
         read -p "Would you like to download and install it? (y/n): " confirm
         if [[ "${confirm,,}" != "y" && "${confirm,,}" != "yes" ]]; then
@@ -142,8 +112,7 @@ check_and_install_restic() {
     local temp_binary temp_checksums temp_signature
     temp_binary=$(mktemp) && temp_checksums=$(mktemp) && temp_signature=$(mktemp)
     trap 'rm -f "$temp_binary" "$temp_checksums" "$temp_signature"' RETURN
-    local arch
-    arch=$(uname -m)
+    local arch=$(uname -m)
     local arch_suffix=""
     case "$arch" in
         x86_64) arch_suffix="amd64" ;;
@@ -188,44 +157,29 @@ check_for_script_update() {
     if ! [ -t 0 ]; then
         return 0
     fi
-    if ! command -v jq &>/dev/null; then
-        echo -e "${C_YELLOW}Skipping script update check: 'jq' command not found.${C_RESET}"
-        return 0
-    fi
     echo -e "${C_BOLD}--- Checking for script updates ---${C_RESET}"
-    local SCRIPT_API_URL="https://api.github.com/repos/buildplan/restic-backup-script/releases/latest"
-    local release_info
-    release_info=$(curl -sL "$SCRIPT_API_URL")
+    local SCRIPT_URL="https://raw.githubusercontent.com/buildplan/restic-backup-script/main/restic-backup.sh"
     local remote_version
-    remote_version=$(echo "$release_info" | jq -r '.tag_name | sub("^v"; "")')
+    remote_version=$(curl -sL "$SCRIPT_URL" | grep 'SCRIPT_VERSION=' | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
     if [ -z "$remote_version" ] || [[ "$remote_version" == "$SCRIPT_VERSION" ]]; then
         echo -e "${C_GREEN}✅ Script is up to date (version $SCRIPT_VERSION).${C_RESET}"
         return 0
     fi
-    local release_notes
-    release_notes=$(echo "$release_info" | jq -r '.body')
-    display_update_info "this script" "$SCRIPT_VERSION" "$remote_version" "$release_notes"
-
+    echo -e "${C_YELLOW}A new version of this script is available ($remote_version). You are running $SCRIPT_VERSION.${C_RESET}"
     read -p "Would you like to download and update now? (y/n): " confirm
     if [[ "${confirm,,}" != "y" && "${confirm,,}" != "yes" ]]; then
         echo "Skipping update."
         return 0
     fi
-    local script_url checksum_url
-    script_url=$(echo "$release_info" | jq -r '.assets[] | select(.name == "restic-backup.sh") | .browser_download_url')
-    checksum_url=$(echo "$release_info" | jq -r '.assets[] | select(.name == "restic-backup.sh.sha256") | .browser_download_url')
-    if [ -z "$script_url" ] || [ -z "$checksum_url" ]; then
-        echo -e "${C_RED}Could not find script/checksum download URLs in the latest release. Aborting update.${C_RESET}" >&2
-        return 1
-    fi
     local temp_script temp_checksum
     temp_script=$(mktemp)
     temp_checksum=$(mktemp)
     trap 'rm -f "$temp_script" "$temp_checksum"' RETURN
+    local CHECKSUM_URL="${SCRIPT_URL}.sha256"
     local curl_opts=(-sL --fail --retry 3 --retry-delay 2)
     echo "Downloading script update..."
-    if ! curl "${curl_opts[@]}" -o "$temp_script"   "$script_url";    then echo "Download failed"; return 1; fi
-    if ! curl "${curl_opts[@]}" -o "$temp_checksum" "$checksum_url";  then echo "Download failed"; return 1; fi
+    if ! curl "${curl_opts[@]}" -o "$temp_script"   "$SCRIPT_URL";    then echo "Download failed"; return 1; fi
+    if ! curl "${curl_opts[@]}" -o "$temp_checksum" "$CHECKSUM_URL";  then echo "Download failed"; return 1; fi
     echo "Verifying downloaded file integrity..."
     local remote_hash
     remote_hash=$(awk '{print $1}' "$temp_checksum")
@@ -317,9 +271,6 @@ display_help() {
     echo -e "  Run a backup now:            ${C_GREEN}sudo $prog${C_RESET}"
     echo -e "  Verbose diff summary:        ${C_GREEN}sudo $prog --verbose --diff${C_RESET}"
     echo -e "  Fix perms (interactive):     ${C_GREEN}sudo $prog --fix-permissions --test${C_RESET}"
-    echo
-    echo -e "${C_BOLD}${C_YELLOW}DEPENDENCIES:${C_RESET}"
-    echo -e "  This script requires: ${C_GREEN}restic, curl, gpg, bzip2, less, jq, flock${C_RESET}"
     echo
     echo -e "Config: ${C_DIM}${CONFIG_FILE}${C_RESET}  Log: ${C_DIM}${LOG_FILE}${C_RESET}"
     echo
@@ -685,21 +636,22 @@ run_preflight_checks() {
     # System Dependencies
     if [[ "$verbosity" == "verbose" ]]; then
         echo -e "\n  ${C_DIM}- Checking System Dependencies${C_RESET}"
-        printf "     %-65s" "Required commands (restic, curl, gpg, bzip2, less, flock, jq)..."
+        printf "     %-65s" "Required commands (restic, curl, flock)..."
     fi
-    local required_cmds=(restic curl flock jq less gpg bzip2)
+    local required_cmds=(restic curl flock)
     for cmd in "${required_cmds[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then
-            local install_hint="On Debian-based systems, try: sudo apt install $cmd"
-            case "$cmd" in
-                gpg) install_hint="On Debian-based systems, try: sudo apt install gnupg";;
-                bzip2) install_hint="On Debian-based systems, try: sudo apt install bzip2";;
-                less) install_hint="On Debian-based systems, try: sudo apt install less";;
-            esac
-            handle_failure "Required command '$cmd' not found. $install_hint" "10"
+            handle_failure "Required command '$cmd' not found." "10"
         fi
     done
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
+    if [[ "$mode" == "diff" ]]; then
+        if [[ "$verbosity" == "verbose" ]]; then printf "     %-65s" "jq command for --diff..."; fi
+        if ! command -v jq &>/dev/null; then
+            handle_failure "'jq' is required for the --diff command. Install on Debian based system with sudo apt install jq" "10"
+        fi
+        if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
+    fi
     # --- Performance Settings Validation ---
     if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Performance Settings${C_RESET}"; fi
     local numeric_vars=("GOMAXPROCS_LIMIT" "LIMIT_THREADS" "LIMIT_UPLOAD" "SFTP_CONNECTIONS")
