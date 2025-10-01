@@ -93,8 +93,11 @@ display_update_info() {
 check_and_install_restic() {
     echo -e "${C_BOLD}--- Checking Restic Version ---${C_RESET}"
     if ! command -v bzip2 &>/dev/null || ! command -v curl &>/dev/null || ! command -v gpg &>/dev/null || ! command -v jq &>/dev/null; then
-        echo -e "${C_RED}ERROR: 'bzip2', 'curl', 'gpg', and 'jq' are required for secure auto-installation.${C_RESET}" >&2
-        echo -e "${C_YELLOW}On Debian based systems install with: sudo apt-get install bzip2 curl gnupg jq${C_RESET}" >&2
+        echo
+        echo -e "${C_RED}ERROR: 'less', 'bzip2', 'curl', 'gpg', and 'jq' are required for secure auto-installation.${C_RESET}" >&2
+        echo
+        echo -e "${C_YELLOW}On Debian based systems install with: sudo apt-get install less bzip2 curl gnupg jq${C_RESET}" >&2
+        echo
         exit 1
     fi
     local release_info
