@@ -235,6 +235,10 @@ check_for_script_update() {
         return 1
     fi
     echo -e "${C_GREEN}✅ Checksum verified successfully.${C_RESET}"
+    if ! grep -q -E "^#!/(usr/)?bin/(env )?bash" "$temp_script"; then
+        echo -e "${C_RED}Downloaded file does not appear to be a valid script. Aborting update.${C_RESET}" >&2
+        return 1
+    fi
     chmod +x "$temp_script"
     mv "$temp_script" "$0"
     if [ -n "${SUDO_USER:-}" ] && [[ "$SCRIPT_DIR" != /root* ]]; then
