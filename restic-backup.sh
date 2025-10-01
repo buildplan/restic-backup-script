@@ -192,10 +192,10 @@ check_for_script_update() {
         echo -e "${C_YELLOW}Skipping script update check: 'jq' command not found.${C_RESET}"
         return 0
     fi
-    echo -e "${C_BOLD}--- Checking for script updates ---${C_RESET}"
+    echo -e "${C_BOLD}--- Checking for script updates ---${C_RESET}"    
     local SCRIPT_API_URL="https://api.github.com/repos/buildplan/restic-backup-script/releases/latest"
     local release_info
-    release_info=$(curl -sL "$SCRIPT_API_URL")
+    release_info=$(curl -sL -H "Cache-Control: no-cache" -H "Pragma: no-cache" "$SCRIPT_API_URL")
     local remote_version
     remote_version=$(echo "$release_info" | jq -r '.tag_name | sub("^v"; "")')
     if [ -z "$remote_version" ] || [[ "$remote_version" == "$SCRIPT_VERSION" ]]; then
@@ -203,29 +203,23 @@ check_for_script_update() {
         return 0
     fi
     local release_notes
-    release_notes=$(echo "$release_info" | jq -r '.body')
+    release_notes=$(echo "$release_info" | jq -r '.body // "Could not retrieve release notes."')
     display_update_info "this script" "$SCRIPT_VERSION" "$remote_version" "$release_notes"
-
-    read -p "Would you like to download and update now? (y/n): " confirm
-    if [[ "${confirm,,}" != "y" && "${confirm,,}" != "yes" ]]; then
+    read -rp "Would you like to download and update now? (y/n): " confirm
+    if [[ ! "$confirm" =~ ^[yY]$ ]]; then
         echo "Skipping update."
         return 0
     fi
-    local script_url checksum_url
-    script_url=$(echo "$release_info" | jq -r '.assets[] | select(.name == "restic-backup.sh") | .browser_download_url')
-    checksum_url=$(echo "$release_info" | jq -r '.assets[] | select(.name == "restic-backup.sh.sha256") | .browser_download_url')
-    if [ -z "$script_url" ] || [ -z "$checksum_url" ]; then
-        echo -e "${C_RED}Could not find script/checksum download URLs in the latest release. Aborting update.${C_RESET}" >&2
-        return 1
-    fi
+    local SCRIPT_URL="https://raw.githubusercontent.com/buildplan/restic-backup-script/main/restic-backup.sh"
+    local CHECKSUM_URL="${SCRIPT_URL}.sha256"
     local temp_script temp_checksum
     temp_script=$(mktemp)
     temp_checksum=$(mktemp)
     trap 'rm -f "$temp_script" "$temp_checksum"' RETURN
-    local curl_opts=(-sL --fail --retry 3 --retry-delay 2)
-    echo "Downloading script update..."
-    if ! curl "${curl_opts[@]}" -o "$temp_script"   "$script_url";    then echo "Download failed"; return 1; fi
-    if ! curl "${curl_opts[@]}" -o "$temp_checksum" "$checksum_url";  then echo "Download failed"; return 1; fi
+    local curl_opts=(-sL --fail --retry 3 --retry-delay 2 -H "Cache-Control: no-cache" -H "Pragma: no-cache")
+    echo "Downloading script update from raw file URL..."
+    if ! curl "${curl_opts[@]}" -o "$temp_script"   "$SCRIPT_URL";    then echo "Download failed"; return 1; fi
+    if ! curl "${curl_opts[@]}" -o "$temp_checksum" "$CHECKSUM_URL";  then echo "Download failed"; return 1; fi    
     echo "Verifying downloaded file integrity..."
     local remote_hash
     remote_hash=$(awk '{print $1}' "$temp_checksum")
@@ -241,10 +235,6 @@ check_for_script_update() {
         return 1
     fi
     echo -e "${C_GREEN}✅ Checksum verified successfully.${C_RESET}"
-    if ! grep -q -E "^#!/(usr/)?bin/(env )?bash" "$temp_script"; then
-        echo -e "${C_RED}Downloaded file does not appear to be a valid script. Aborting update.${C_RESET}" >&2
-        return 1
-    fi
     chmod +x "$temp_script"
     mv "$temp_script" "$0"
     if [ -n "${SUDO_USER:-}" ] && [[ "$SCRIPT_DIR" != /root* ]]; then
