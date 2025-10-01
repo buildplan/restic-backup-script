@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.37 - 2025.10.01
+#         Restic Backup Script v0.37.1 - 2025.10.02
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.37"
+SCRIPT_VERSION="0.37.1"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -219,7 +219,7 @@ check_for_script_update() {
     local curl_opts=(-sL --fail --retry 3 --retry-delay 2 -H "Cache-Control: no-cache" -H "Pragma: no-cache")
     echo "Downloading script update from raw file URL..."
     if ! curl "${curl_opts[@]}" -o "$temp_script"   "$SCRIPT_URL";    then echo "Download failed"; return 1; fi
-    if ! curl "${curl_opts[@]}" -o "$temp_checksum" "$CHECKSUM_URL";  then echo "Download failed"; return 1; fi    
+    if ! curl "${curl_opts[@]}" -o "$temp_checksum" "$CHECKSUM_URL";  then echo "Download failed"; return 1; fi
     echo "Verifying downloaded file integrity..."
     local remote_hash
     remote_hash=$(awk '{print $1}' "$temp_checksum")
