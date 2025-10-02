@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.37.1 - 2025.10.02
+#         Restic Backup Script v0.37.2 - 2025.10.02
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.37.1"
+SCRIPT_VERSION="0.37.2"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -1045,27 +1045,38 @@ run_uninstall_scheduler() {
     local service_file="/etc/systemd/system/restic-backup.service"
     local timer_file="/etc/systemd/system/restic-backup.timer"
     local cron_file="/etc/cron.d/restic-backup"
-    local found=false
+    local -a files_to_remove=()
+    [ -f "$timer_file" ] && files_to_remove+=("$timer_file")
+    [ -f "$service_file" ] && files_to_remove+=("$service_file")
+    [ -f "$cron_file" ] && files_to_remove+=("$cron_file")
 
+    if [ ${#files_to_remove[@]} -eq 0 ]; then
+        echo -e "${C_YELLOW}No scheduled backup tasks found to uninstall.${C_RESET}"
+        return 0
+    fi
+    echo -e "${C_YELLOW}The following scheduled task files will be PERMANENTLY removed:${C_RESET}"
+    for file in "${files_to_remove[@]}"; do
+        echo "  - $file"
+    done
+    echo
+    read -p "Are you sure you want to proceed? (y/n): " confirm
+    if [[ "${confirm,,}" != "y" ]]; then
+        echo "Aborted by user."
+        return 0
+    fi
     if [ -f "$timer_file" ]; then
-        found=true
-        echo "Found systemd timer. Stopping and disabling..."
-        systemctl stop restic-backup.timer
-        systemctl disable restic-backup.timer
-        rm -f "$timer_file" "$service_file"
+        echo "Stopping and disabling systemd timer..."
+        systemctl stop restic-backup.timer >/dev/null 2>&1 || true
+        systemctl disable restic-backup.timer >/dev/null 2>&1 || true
+    fi
+    echo "Removing files..."
+    rm -f "${files_to_remove[@]}"
+    if [ -f "$timer_file" ]; then
         systemctl daemon-reload
         echo -e "${C_GREEN}✅ systemd timer and service files removed.${C_RESET}"
     fi
-
     if [ -f "$cron_file" ]; then
-        found=true
-        echo "Found cron file. Removing..."
-        rm -f "$cron_file"
-        echo -e "${C_GREEN}✅ Cron file removed.${C_RESET}"
-    fi
-
-    if [ "$found" = false ]; then
-        echo -e "${C_YELLOW}No scheduled backup tasks found to uninstall.${C_RESET}"
+         echo -e "${C_GREEN}✅ Cron file removed.${C_RESET}"
     fi
 }
 
