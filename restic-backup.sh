@@ -1045,11 +1045,18 @@ run_uninstall_scheduler() {
     local service_file="/etc/systemd/system/restic-backup.service"
     local timer_file="/etc/systemd/system/restic-backup.timer"
     local cron_file="/etc/cron.d/restic-backup"
+    local was_systemd=false
+    local was_cron=false
     local -a files_to_remove=()
-    [ -f "$timer_file" ] && files_to_remove+=("$timer_file")
-    [ -f "$service_file" ] && files_to_remove+=("$service_file")
-    [ -f "$cron_file" ] && files_to_remove+=("$cron_file")
-
+    if [ -f "$timer_file" ]; then
+        was_systemd=true
+        files_to_remove+=("$timer_file")
+        [ -f "$service_file" ] && files_to_remove+=("$service_file")
+    fi
+    if [ -f "$cron_file" ]; then
+        was_cron=true
+        files_to_remove+=("$cron_file")
+    fi
     if [ ${#files_to_remove[@]} -eq 0 ]; then
         echo -e "${C_YELLOW}No scheduled backup tasks found to uninstall.${C_RESET}"
         return 0
@@ -1064,18 +1071,18 @@ run_uninstall_scheduler() {
         echo "Aborted by user."
         return 0
     fi
-    if [ -f "$timer_file" ]; then
+    if [[ "$was_systemd" == "true" ]]; then
         echo "Stopping and disabling systemd timer..."
         systemctl stop restic-backup.timer >/dev/null 2>&1 || true
         systemctl disable restic-backup.timer >/dev/null 2>&1 || true
     fi
     echo "Removing files..."
     rm -f "${files_to_remove[@]}"
-    if [ -f "$timer_file" ]; then
+    if [[ "$was_systemd" == "true" ]]; then
         systemctl daemon-reload
         echo -e "${C_GREEN}✅ systemd timer and service files removed.${C_RESET}"
-    fi
-    if [ -f "$cron_file" ]; then
+    fi   
+    if [[ "$was_cron" == "true" ]]; then
          echo -e "${C_GREEN}✅ Cron file removed.${C_RESET}"
     fi
 }
