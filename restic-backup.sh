@@ -1364,7 +1364,7 @@ _run_restore_command() {
 
     # Build the command
     local restic_cmd=(restic)
-    restic_cmd+=("$(get_verbosity_flags)")
+    restic_cmd+=($(get_verbosity_flags))
     restic_cmd+=(restore "$snapshot_id" --target "$restore_dest")
     
     # Add optional file paths to include
@@ -1389,6 +1389,10 @@ run_background_restore() {
     local restore_dest="${2:?--background-restore requires a destination path}"
     
     if [[ "$snapshot_id" == "latest" ]]; then
+        if ! restic snapshots --json | jq 'length > 0' | grep -q true; then
+            echo -e "${C_RED}Error: No snapshots exist in the repository. Cannot restore 'latest'. Aborting.${C_RESET}" >&2
+            exit 1
+        fi
         snapshot_id=$(restic snapshots --latest 1 --json | jq -r '.[0].id')
     fi
     if [[ -z "$restore_dest" || "$restore_dest" != /* ]]; then
