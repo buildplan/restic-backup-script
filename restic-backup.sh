@@ -1399,8 +1399,11 @@ run_background_restore() {
             local end_time=$(date +%s)
             local duration=$((end_time - start_time))
             log_message "Background restore SUCCESS: ${snapshot_id} to ${restore_dest} in ${duration}s."
+            local notification_message
+            printf -v notification_message "Successfully restored snapshot %s to %s in %dm %ds." \
+                "${snapshot_id:0:8}" "${restore_dest}" "$((duration / 60))" "$((duration % 60))"
             send_notification "Restore SUCCESS: $HOSTNAME" "white_check_mark" \
-                "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully restored snapshot ${snapshot_id:0:8} to ${restore_dest} in $((duration / 60))m ${duration % 60}s."
+                "${NTFY_PRIORITY_SUCCESS}" "success" "$notification_message"
         else
             log_message "Background restore FAILED: ${snapshot_id} to ${restore_dest}."
             send_notification "Restore FAILED: $HOSTNAME" "x" \
