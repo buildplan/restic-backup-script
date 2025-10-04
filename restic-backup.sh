@@ -1587,6 +1587,7 @@ case "${1:-}" in
         if ! run_sync_restore "$@"; then
             restore_exit_code=1
         fi
+        ;;
     --check)
         run_preflight_checks "backup" "quiet"
         run_check
