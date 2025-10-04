@@ -1364,7 +1364,7 @@ _run_restore_command() {
 
     # Build the command
     local restic_cmd=(restic)
-    restic_cmd+=($(get_verbosity_flags))
+    restic_cmd+=("$(get_verbosity_flags)")
     restic_cmd+=(restore "$snapshot_id" --target "$restore_dest")
     
     # Add optional file paths to include
@@ -1596,7 +1596,7 @@ case "${1:-}" in
     --sync-restore)
         shift
         run_preflight_checks "restore" "quiet"
-        log_message "=== Starting sync-restore run ==="        
+        log_message "=== Starting sync-restore run ==="
         restore_exit_code=0
         if ! run_sync_restore "$@"; then
             restore_exit_code=1
