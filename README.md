@@ -455,6 +455,6 @@ To run the backup automatically, edit the root crontab.
 
     ```
 
-    *For pune job in your `restic-backup.conf`, set `PRUNE_AFTER_FORGET=true`.*  
+    *For prune job in your `restic-backup.conf`, set `PRUNE_AFTER_FORGET=true`.*  
     *For more details on how forget flag work, see the [official Restic documentation on removing snapshots](https://restic.readthedocs.io/en/stable/060_forget.html).*  
     *Redirecting output to `/dev/null` is recommended, as the script handles its own logging and notifications.*
