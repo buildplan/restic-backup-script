@@ -1424,9 +1424,11 @@ run_background_restore() {
 
 run_sync_restore() {
     log_message "Starting synchronous restore."
+    local restore_dest="$2"
     
     if _run_restore_command "$@"; then
-        _handle_restore_ownership "$@"
+        _handle_restore_ownership "$restore_dest"
+        
         log_message "Sync-restore SUCCESS."
         send_notification "Sync Restore SUCCESS: $HOSTNAME" "white_check_mark" \
             "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully completed synchronous restore."
@@ -1594,11 +1596,19 @@ case "${1:-}" in
     --sync-restore)
         shift
         run_preflight_checks "restore" "quiet"
-        log_message "=== Starting sync-restore run ==="
+        log_message "=== Starting sync-restore run ==="        
         restore_exit_code=0
         if ! run_sync_restore "$@"; then
             restore_exit_code=1
         fi
+        log_message "=== Sync-restore run completed ==="
+        # --- Ping Healthchecks.io (Success or Failure) ---
+        if [ "$restore_exit_code" -eq 0 ] && [[ -n "${HEALTHCHECKS_URL:-}" ]]; then
+            curl -fsS -m 15 --retry 3 "${HEALTHCHECKS_URL}" >/dev/null 2>>"$LOG_FILE"
+        elif [ "$restore_exit_code" -ne 0 ] && [[ -n "${HEALTHCHECKS_URL:-}" ]]; then
+            curl -fsS -m 15 --retry 3 "${HEALTHCHECKS_URL}/fail" >/dev/null 2>>"$LOG_FILE"
+        fi
+        exit "$restore_exit_code"
         ;;
     --check)
         run_preflight_checks "backup" "quiet"
