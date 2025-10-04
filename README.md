@@ -94,13 +94,13 @@ For those familiar with setting up backup scripts, here is a fast track to get y
 
 -----
 
-### Restoring Your Data
+### Restoring Data
 
-The script provides three distinct modes for restoring data, each designed for a different scenario.
+Script provides three distinct modes for restoring data, each designed for a different scenario.
 
 #### 1. Interactive Restore (`--restore`)
 
-This is a user-friendly wizard for guided restores. It is the best option when you are at the terminal and need to find and recover specific files or directories.
+This is an interactive wizard for guided restores. It is the best option when you are at the terminal and need to find and recover specific files or directories.
 
 - **Best for**: Visually finding and restoring specific files or small directories.
 - **Process**:
@@ -122,9 +122,9 @@ This mode is designed for restoring large amounts of data (e.g., a full server r
 - **Best for**: Large, time-consuming restores or recovering data over a slow network connection.
 - **How it works**:
   - This command is **non-interactive**. You must provide the snapshot ID and destination path as arguments directly on the command line.
-  - The restore job is launched in the background, immediately freeing up your terminal.
+  - The restore job is launched in the background, immediately freeing up terminal.
   - All output is saved to a log file in `/tmp/`.
-  - You will receive a success or failure notification (via ntfy, Discord, etc.) upon completion.
+  - A success or failure notification (via ntfy, Discord, etc.) upon completion.
 
 **Usage:**
 
@@ -138,19 +138,22 @@ sudo ./restic-backup.sh --background-restore a1b2c3d4 /mnt/disaster-recovery
 
 #### 3. Synchronous Restore (`--sync-restore`)
 
-This mode runs the restore in the foreground and waits for it to complete before exiting. It's a reliable, non-interactive way to create a complete, consistent copy of your backup data.
+This mode runs the restore in the foreground and waits for it to complete before exiting. It's a reliable, non-interactive way to create a complete, consistent copy of backup data.
 
-- **Best for**: Creating a secondary copy of your backup on another server (for a 3-2-1 strategy) or for use in any automation where subsequent steps depend on the restore being finished.
+- **Best for**: Creating a secondary copy of backup (for example, via a cron job) on another server (for a 3-2-1 strategy) or for use in any automation where subsequent steps depend on the restore being finished.
 - **How it works**:
   - This command is **non-interactive** and requires the snapshot ID and destination path as command-line arguments.
-  - It runs as a foreground process, blocking the terminal or script until the restore is 100% complete.
-  - This guarantees the data copy is finished before any other commands are run.
+  - It runs as a synchronous (blocking) process. When a cron job executes the command, the job itself will not finish until the restore is 100% complete.
+  - This guarantees the data copy is finished before any other commands are run or the cron job is marked as complete.
 
 **Usage:**
 
 ```sh
 # On a second server, pull a full copy of the latest backup
 sudo ./restic-backup.sh --sync-restore latest /mnt/local-backup-copy
+
+# On your secondary server, run a sync-restore every day at 5:00 AM.
+0 5 * * * /path/to/your/script/restic-backup.sh --sync-restore latest /path/to/local/restore/copy >> /var/log/restic-restore.log 2>&1
 
 # Can also be used in a script to ensure a process runs only after a restore
 sudo ./restic-backup.sh --sync-restore latest /srv/app/data && systemctl restart my-app
