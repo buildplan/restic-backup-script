@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.37.2 - 2025.10.02
+#         Restic Backup Script v0.38 - 2025.10.04
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.37.2"
+SCRIPT_VERSION="0.38"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -302,6 +302,8 @@ display_help() {
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Apply retention policy; optionally prune."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--unlock" "Remove stale repository locks."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--restore" "Interactive restore wizard."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--background-restore" "Run a non-interactive restore in the background."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--sync-restore" "Run a non-interactive restore in the foreground (for cron)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dry-run" "Preview backup changes (no snapshot)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--test" "Validate config, permissions, connectivity."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--install-scheduler" "Install an automated schedule (systemd/cron)."
@@ -311,6 +313,7 @@ display_help() {
     echo -e "  Run a backup now:            ${C_GREEN}sudo $prog${C_RESET}"
     echo -e "  Verbose diff summary:        ${C_GREEN}sudo $prog --verbose --diff${C_RESET}"
     echo -e "  Fix perms (interactive):     ${C_GREEN}sudo $prog --fix-permissions --test${C_RESET}"
+    echo -e "  Background restore:          ${C_GREEN}sudo $prog --background-restore latest /mnt/restore${C_RESET}"
     echo
     echo -e "${C_BOLD}${C_YELLOW}DEPENDENCIES:${C_RESET}"
     echo -e "  This script requires: ${C_GREEN}restic, curl, gpg, bzip2, less, jq, flock${C_RESET}"
@@ -1347,6 +1350,83 @@ run_restore() {
     rm -f "$restore_log"
 }
 
+_run_restore_command() {
+    local snapshot_id="$1"
+    local restore_dest="$2"
+    shift 2
+
+    # Build the command
+    local restic_cmd=(restic)
+    restic_cmd+=($(get_verbosity_flags))
+    restic_cmd+=(restore "$snapshot_id" --target "$restore_dest")
+    
+    # Add optional file paths to include
+    if [ $# -gt 0 ]; then
+        for path in "$@"; do
+            restic_cmd+=(--include "$path")
+        done
+    fi
+
+    # Execute and return success or failure
+    if run_with_priority "${restic_cmd[@]}"; then
+        return 0 # Success
+    else
+        return 1 # Failure
+    fi
+}
+
+run_background_restore() {
+    echo -e "${C_BOLD}--- Background Restore Mode ---${C_RESET}"
+    
+    local snapshot_id="${1:?--background-restore requires a snapshot ID}"
+    local restore_dest="${2:?--background-restore requires a destination path}"
+    
+    if [[ "$snapshot_id" == "latest" ]]; then
+        snapshot_id=$(restic snapshots --latest 1 --json | jq -r '.[0].id')
+    fi
+    if [[ -z "$restore_dest" || "$restore_dest" != /* ]]; then
+        echo -e "${C_RED}Error: Destination must be a non-empty, absolute path. Aborting.${C_RESET}" >&2
+        exit 1
+    fi
+
+    local restore_log="/tmp/restic-restore-${snapshot_id:0:8}-$(date +%s).log"
+    echo "Restore job started. Details will be logged to: ${restore_log}"
+    log_message "Starting background restore of snapshot ${snapshot_id} to ${restore_dest}. See ${restore_log} for details."
+    
+    (
+        local start_time=$(date +%s)
+        if _run_restore_command "$@"; then
+            local end_time=$(date +%s)
+            local duration=$((end_time - start_time))
+            log_message "Background restore SUCCESS: ${snapshot_id} to ${restore_dest} in ${duration}s."
+            send_notification "Restore SUCCESS: $HOSTNAME" "white_check_mark" \
+                "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully restored snapshot ${snapshot_id:0:8} to ${restore_dest} in $((duration / 60))m ${duration % 60}s."
+        else
+            log_message "Background restore FAILED: ${snapshot_id} to ${restore_dest}."
+            send_notification "Restore FAILED: $HOSTNAME" "x" \
+                "${NTFY_PRIORITY_FAILURE}" "failure" "Failed to restore snapshot ${snapshot_id:0:8} to ${restore_dest}. Check log: ${restore_log}"
+        fi
+    ) > "$restore_log" 2>&1 &
+    
+    echo -e "${C_GREEN}✅ Restore job launched in the background. You will receive a notification upon completion.${C_RESET}"
+}
+
+run_sync_restore() {
+    log_message "Starting synchronous restore."
+    
+    if _run_restore_command "$@"; then
+        log_message "Sync-restore SUCCESS."
+        send_notification "Sync Restore SUCCESS: $HOSTNAME" "white_check_mark" \
+            "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully completed synchronous restore."
+        return 0
+    else
+        log_message "Sync-restore FAILED."
+        send_notification "Sync Restore FAILED: $HOSTNAME" "x" \
+            "${NTFY_PRIORITY_FAILURE}" "failure" "Synchronous restore failed. Check the logs for details."
+        return 1
+    fi
+}
+
 run_snapshots_delete() {
     echo -e "${C_BOLD}--- Interactively Delete Snapshots ---${C_RESET}"
     echo -e "${C_BOLD}${C_RED}WARNING: This operation is permanent and cannot be undone.${C_RESET}"
@@ -1494,6 +1574,19 @@ case "${1:-}" in
         run_preflight_checks "restore" "quiet"
         run_restore
         ;;
+    --background-restore)
+        shift
+        run_preflight_checks "restore" "quiet"
+        run_background_restore "$@"
+        ;;
+    --sync-restore)
+        shift
+        run_preflight_checks "restore" "quiet"
+        log_message "=== Starting sync-restore run ==="
+        restore_exit_code=0
+        if ! run_sync_restore "$@"; then
+            restore_exit_code=1
+        fi
     --check)
         run_preflight_checks "backup" "quiet"
         run_check
