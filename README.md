@@ -24,6 +24,47 @@ This script automates encrypted, deduplicated backups of local directories to a 
 
 -----
 
+## Quick Start
+
+For those familiar with setting up backup scripts, here is a fast track to get you up and running.
+
+1. **Download Files:**
+
+    ```sh
+    mkdir -p /root/scripts/backup && cd /root/scripts/backup
+    curl -LO https://raw.githubusercontent.com/buildplan/restic-backup-script/refs/heads/main/restic-backup.sh
+    curl -LO https://raw.githubusercontent.com/buildplan/restic-backup-script/refs/heads/main/restic-backup.conf
+    curl -LO https://raw.githubusercontent.com/buildplan/restic-backup-script/refs/heads/main/restic-excludes.txt
+    chmod +x restic-backup.sh
+    ```
+
+2. **Edit Configuration:**
+    - Modify `restic-backup.conf` with your repository details, source paths, and password file location.
+    - Set secure permissions: `chmod 600 restic-backup.conf`.
+
+3. **Create Password & Initialize:**
+
+    ```sh
+    # Create the password file (use a strong password)
+    echo 'your-very-secure-password' | sudo tee /root/.restic-password
+    sudo chmod 400 /root/.restic-password
+
+    # Initialize the remote repository
+    sudo ./restic-backup.sh --init
+    ```
+
+4. **Run First Backup & Schedule:**
+
+    ```sh
+    # Run your first backup with verbose output
+    sudo ./restic-backup.sh --verbose
+
+    # Set up a recurring schedule with the interactive wizard
+    sudo ./restic-backup.sh --install-scheduler
+    ```
+
+-----
+
 ## Usage
 
 ### Run Modes
@@ -38,6 +79,8 @@ This script automates encrypted, deduplicated backups of local directories to a 
 - `sudo ./restic-backup.sh --install-scheduler` - Run the interactive wizard to set up an automated backup schedule (systemd/cron).
 - `sudo ./restic-backup.sh --uninstall-scheduler` - Remove a schedule created by the wizard.
 - `sudo ./restic-backup.sh --restore` - Start the interactive restore wizard.
+- `sudo ./restic-backup.sh --background-restore <snapshot> <dest>` - Restore in the background (non-blocking).
+- `sudo ./restic-backup.sh --sync-restore <snapshot> <dest>` - Restore in a cronjob (helpful for 3-2-1 backup strategy).
 - `sudo ./restic-backup.sh --forget` - Manually apply the retention policy and prune old data.
 - `sudo ./restic-backup.sh --diff` - Show a summary of changes between the last two snapshots.
 - `sudo ./restic-backup.sh --stats` - Display repository size, file counts, and stats.
@@ -48,6 +91,72 @@ This script automates encrypted, deduplicated backups of local directories to a 
 - `sudo ./restic-backup.sh --help` - Displays help and all the flags.
 
 > *Default log location: `/var/log/restic-backup.log`*
+
+-----
+
+### Restoring Your Data
+
+The script provides three distinct modes for restoring data, each designed for a different scenario.
+
+#### 1. Interactive Restore (`--restore`)
+
+This is a user-friendly wizard for guided restores. It is the best option when you are at the terminal and need to find and recover specific files or directories.
+
+- **Best for**: Visually finding and restoring specific files or small directories.
+- **Process**:
+      - Lists available snapshots for you to choose from.
+      - Asks for a destination path.
+      - Performs a "dry run" to show you what will be restored before making any changes.
+      - Requires your confirmation before proceeding with the actual restore.
+
+**Usage:**
+
+```sh
+sudo ./restic-backup.sh --restore
+```
+
+#### 2. Background Restore (`--background-restore`)
+
+This mode is designed for restoring large amounts of data (e.g., a full server recovery) without needing to keep your terminal session active.
+
+- **Best for**: Large, time-consuming restores or recovering data over a slow network connection.
+- **How it works**:
+  - This command is **non-interactive**. You must provide the snapshot ID and destination path as arguments directly on the command line.
+  - The restore job is launched in the background, immediately freeing up your terminal.
+  - All output is saved to a log file in `/tmp/`.
+  - You will receive a success or failure notification (via ntfy, Discord, etc.) upon completion.
+
+**Usage:**
+
+```sh
+# Restore the latest snapshot to a specific directory in the background
+sudo ./restic-backup.sh --background-restore latest /mnt/disaster-recovery
+
+# Restore a specific snapshot by its ID
+sudo ./restic-backup.sh --background-restore a1b2c3d4 /mnt/disaster-recovery
+```
+
+#### 3. Synchronous Restore (`--sync-restore`)
+
+This mode runs the restore in the foreground and waits for it to complete before exiting. It's a reliable, non-interactive way to create a complete, consistent copy of your backup data.
+
+- **Best for**: Creating a secondary copy of your backup on another server (for a 3-2-1 strategy) or for use in any automation where subsequent steps depend on the restore being finished.
+- **How it works**:
+  - This command is **non-interactive** and requires the snapshot ID and destination path as command-line arguments.
+  - It runs as a foreground process, blocking the terminal or script until the restore is 100% complete.
+  - This guarantees the data copy is finished before any other commands are run.
+
+**Usage:**
+
+```sh
+# On a second server, pull a full copy of the latest backup
+sudo ./restic-backup.sh --sync-restore latest /mnt/local-backup-copy
+
+# Can also be used in a script to ensure a process runs only after a restore
+sudo ./restic-backup.sh --sync-restore latest /srv/app/data && systemctl restart my-app
+```
+
+-----
 
 #### Diagnostics & Error Codes
 
@@ -115,8 +224,11 @@ uname -m
 
 ```sh
 # Download the latest binary for your architecture from the Restic GitHub page
-# Example 0.18.0 is latest as of Aug,2025 for amd64:
-curl -LO https://github.com/restic/restic/releases/download/v0.18.0/restic_0.18.0_linux_amd64.bz2
+# Go to the Restic GitHub releases page to find the URL for the latest version:
+# https://github.com/restic/restic/releases
+
+# Download the latest binary for your architecture (replace URL with the one you found)
+curl -LO <URL_of_latest_restic_linux_amd64.bz2>
 ```
 
 ```sh
@@ -125,6 +237,8 @@ bunzip2 restic_*.bz2
 chmod +x restic_*
 sudo mv restic_* /usr/local/bin/restic
 ```
+
+-----
 
 #### Package Breakdown
 
@@ -182,6 +296,8 @@ The most reliable way for the script to connect to a remote server is via an SSH
     # This command should connect without a password and print "/home"
     sudo ssh storagebox pwd
     ```
+
+-----
 
 ### 3. Place and Configure Files
 
@@ -286,6 +402,8 @@ Before the first backup, you need to create the repository password file and ini
     # Run the initialization
     sudo ./restic-backup.sh --init
     ```
+
+-----
 
 ### 5. Set up an Automated Schedule (Recommended)
 
