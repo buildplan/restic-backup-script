@@ -1330,30 +1330,37 @@ run_restore() {
         echo -e "${C_GREEN}✅ Restore completed${C_RESET}"
 
         # Set file ownership logic
-        if [[ "$restore_dest" == /home/* ]]; then
-            local dest_user
-            dest_user=$(stat -c %U "$(dirname "$restore_dest")" 2>/dev/null || echo "${restore_dest#/home/}" | cut -d/ -f1)
-            if [[ -n "$dest_user" ]] && id -u "$dest_user" &>/dev/null; then
-                echo -e "${C_CYAN}ℹ️  Home directory detected. Setting ownership of restored files to '$dest_user'...${C_RESET}"
-                if chown -R "${dest_user}:${dest_user}" "$restore_dest"; then
-                    log_message "Successfully changed ownership of $restore_dest to $dest_user"
-                    echo -e "${C_GREEN}✅ Ownership set to '$dest_user'${C_RESET}"
-                else
-                    log_message "WARNING: Failed to change ownership of $restore_dest to $dest_user"
-                    echo -e "${C_YELLOW}⚠️  Could not set file ownership. Please check permissions manually.${C_RESET}"
-                fi
-            fi
-        fi
+        _handle_restore_ownership "$restore_dest"
+
         send_notification "Restore SUCCESS: $HOSTNAME" "white_check_mark" \
             "${NTFY_PRIORITY_SUCCESS}" "success" "Restored $snapshot_id to $restore_dest"
     fi
     rm -f "$restore_log"
 }
 
+_handle_restore_ownership() {
+    local restore_dest="$1"
+
+    if [[ "$restore_dest" == /home/* ]]; then
+        local dest_user
+        dest_user=$(stat -c %U "$(dirname "$restore_dest")" 2>/dev/null || echo "${restore_dest#/home/}" | cut -d/ -f1)
+
+        if [[ -n "$dest_user" ]] && id -u "$dest_user" &>/dev/null; then
+            log_message "Home directory detected. Setting ownership of restored files to '$dest_user'."
+            if chown -R "${dest_user}:${dest_user}" "$restore_dest"; then
+                log_message "Successfully changed ownership of $restore_dest to $dest_user"
+            else
+                log_message "WARNING: Failed to change ownership of $restore_dest to $dest_user. Please check permissions manually."
+            fi
+        fi
+    fi
+}
+
 _run_restore_command() {
     local snapshot_id="$1"
     local restore_dest="$2"
     shift 2
+    mkdir -p "$restore_dest"
 
     # Build the command
     local restic_cmd=(restic)
@@ -1398,6 +1405,7 @@ run_background_restore() {
         if _run_restore_command "$@"; then
             local end_time=$(date +%s)
             local duration=$((end_time - start_time))
+            _handle_restore_ownership "$restore_dest"
             log_message "Background restore SUCCESS: ${snapshot_id} to ${restore_dest} in ${duration}s."
             local notification_message
             printf -v notification_message "Successfully restored snapshot %s to %s in %dm %ds." \
@@ -1418,6 +1426,7 @@ run_sync_restore() {
     log_message "Starting synchronous restore."
     
     if _run_restore_command "$@"; then
+        _handle_restore_ownership "$@"
         log_message "Sync-restore SUCCESS."
         send_notification "Sync Restore SUCCESS: $HOSTNAME" "white_check_mark" \
             "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully completed synchronous restore."
