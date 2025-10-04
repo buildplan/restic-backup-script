@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.37.2 - 2025.10.02
+#         Restic Backup Script v0.38 - 2025.10.04
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.37.2"
+SCRIPT_VERSION="0.38"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -92,7 +92,7 @@ display_update_info() {
 
 check_and_install_restic() {
     echo -e "${C_BOLD}--- Checking Restic Version ---${C_RESET}"
-    if ! command -v bzip2 &>/dev/null || ! command -v curl &>/dev/null || ! command -v gpg &>/dev/null || ! command -v jq &>/dev/null; then
+    if ! command -v less &>/dev/null || ! command -v bzip2 &>/dev/null || ! command -v curl &>/dev/null || ! command -v gpg &>/dev/null || ! command -v jq &>/dev/null; then
         echo
         echo -e "${C_RED}ERROR: 'less', 'bzip2', 'curl', 'gpg', and 'jq' are required for secure auto-installation.${C_RESET}" >&2
         echo
@@ -302,6 +302,8 @@ display_help() {
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Apply retention policy; optionally prune."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--unlock" "Remove stale repository locks."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--restore" "Interactive restore wizard."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--background-restore" "Run a non-interactive restore in the background."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--sync-restore" "Run a non-interactive restore in the foreground (for cron)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dry-run" "Preview backup changes (no snapshot)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--test" "Validate config, permissions, connectivity."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--install-scheduler" "Install an automated schedule (systemd/cron)."
@@ -311,6 +313,7 @@ display_help() {
     echo -e "  Run a backup now:            ${C_GREEN}sudo $prog${C_RESET}"
     echo -e "  Verbose diff summary:        ${C_GREEN}sudo $prog --verbose --diff${C_RESET}"
     echo -e "  Fix perms (interactive):     ${C_GREEN}sudo $prog --fix-permissions --test${C_RESET}"
+    echo -e "  Background restore:          ${C_GREEN}sudo $prog --background-restore latest /mnt/restore${C_RESET}"
     echo
     echo -e "${C_BOLD}${C_YELLOW}DEPENDENCIES:${C_RESET}"
     echo -e "  This script requires: ${C_GREEN}restic, curl, gpg, bzip2, less, jq, flock${C_RESET}"
@@ -1089,7 +1092,7 @@ run_uninstall_scheduler() {
 
 get_verbosity_flags() {
     local effective_log_level="${LOG_LEVEL:-1}"
-    if [[ "${VERBOSE_MODE}" == "true" ]]; then
+    if [[ "${VERBOSE_MODE:-}" == "true" ]]; then
         effective_log_level=2 # Force verbose level 2 when --verbose is used
     fi
     local flags=()
@@ -1327,24 +1330,119 @@ run_restore() {
         echo -e "${C_GREEN}✅ Restore completed${C_RESET}"
 
         # Set file ownership logic
-        if [[ "$restore_dest" == /home/* ]]; then
-            local dest_user
-            dest_user=$(stat -c %U "$(dirname "$restore_dest")" 2>/dev/null || echo "${restore_dest#/home/}" | cut -d/ -f1)
-            if [[ -n "$dest_user" ]] && id -u "$dest_user" &>/dev/null; then
-                echo -e "${C_CYAN}ℹ️  Home directory detected. Setting ownership of restored files to '$dest_user'...${C_RESET}"
-                if chown -R "${dest_user}:${dest_user}" "$restore_dest"; then
-                    log_message "Successfully changed ownership of $restore_dest to $dest_user"
-                    echo -e "${C_GREEN}✅ Ownership set to '$dest_user'${C_RESET}"
-                else
-                    log_message "WARNING: Failed to change ownership of $restore_dest to $dest_user"
-                    echo -e "${C_YELLOW}⚠️  Could not set file ownership. Please check permissions manually.${C_RESET}"
-                fi
-            fi
-        fi
+        _handle_restore_ownership "$restore_dest"
+
         send_notification "Restore SUCCESS: $HOSTNAME" "white_check_mark" \
             "${NTFY_PRIORITY_SUCCESS}" "success" "Restored $snapshot_id to $restore_dest"
     fi
     rm -f "$restore_log"
+}
+
+_handle_restore_ownership() {
+    local restore_dest="$1"
+
+    if [[ "$restore_dest" == /home/* ]]; then
+        local dest_user
+        dest_user=$(stat -c %U "$(dirname "$restore_dest")" 2>/dev/null || echo "${restore_dest#/home/}" | cut -d/ -f1)
+
+        if [[ -n "$dest_user" ]] && id -u "$dest_user" &>/dev/null; then
+            log_message "Home directory detected. Setting ownership of restored files to '$dest_user'."
+            if chown -R "${dest_user}:${dest_user}" "$restore_dest"; then
+                log_message "Successfully changed ownership of $restore_dest to $dest_user"
+            else
+                log_message "WARNING: Failed to change ownership of $restore_dest to $dest_user. Please check permissions manually."
+            fi
+        fi
+    fi
+}
+
+_run_restore_command() {
+    local snapshot_id="$1"
+    local restore_dest="$2"
+    shift 2
+    mkdir -p "$restore_dest"
+
+    # Build the command
+    local restic_cmd=(restic)
+    restic_cmd+=($(get_verbosity_flags))
+    restic_cmd+=(restore "$snapshot_id" --target "$restore_dest")
+    
+    # Add optional file paths to include
+    if [ $# -gt 0 ]; then
+        for path in "$@"; do
+            restic_cmd+=(--include "$path")
+        done
+    fi
+
+    # Execute and return success or failure
+    if run_with_priority "${restic_cmd[@]}"; then
+        return 0 # Success
+    else
+        return 1 # Failure
+    fi
+}
+
+run_background_restore() {
+    echo -e "${C_BOLD}--- Background Restore Mode ---${C_RESET}"
+    
+    local snapshot_id="${1:?--background-restore requires a snapshot ID}"
+    local restore_dest="${2:?--background-restore requires a destination path}"
+    
+    if [[ "$snapshot_id" == "latest" ]]; then
+        if ! restic snapshots --json | jq 'length > 0' | grep -q true; then
+            echo -e "${C_RED}Error: No snapshots exist in the repository. Cannot restore 'latest'. Aborting.${C_RESET}" >&2
+            exit 1
+        fi
+        snapshot_id=$(restic snapshots --latest 1 --json | jq -r '.[0].id')
+    fi
+    if [[ -z "$restore_dest" || "$restore_dest" != /* ]]; then
+        echo -e "${C_RED}Error: Destination must be a non-empty, absolute path. Aborting.${C_RESET}" >&2
+        exit 1
+    fi
+
+    local restore_log="/tmp/restic-restore-${snapshot_id:0:8}-$(date +%s).log"
+    echo "Restore job started. Details will be logged to: ${restore_log}"
+    log_message "Starting background restore of snapshot ${snapshot_id} to ${restore_dest}. See ${restore_log} for details."
+    
+    (
+        local start_time=$(date +%s)
+        if _run_restore_command "$@"; then
+            local end_time=$(date +%s)
+            local duration=$((end_time - start_time))
+            _handle_restore_ownership "$restore_dest"
+            log_message "Background restore SUCCESS: ${snapshot_id} to ${restore_dest} in ${duration}s."
+            local notification_message
+            printf -v notification_message "Successfully restored snapshot %s to %s in %dm %ds." \
+                "${snapshot_id:0:8}" "${restore_dest}" "$((duration / 60))" "$((duration % 60))"
+            send_notification "Restore SUCCESS: $HOSTNAME" "white_check_mark" \
+                "${NTFY_PRIORITY_SUCCESS}" "success" "$notification_message"
+        else
+            log_message "Background restore FAILED: ${snapshot_id} to ${restore_dest}."
+            send_notification "Restore FAILED: $HOSTNAME" "x" \
+                "${NTFY_PRIORITY_FAILURE}" "failure" "Failed to restore snapshot ${snapshot_id:0:8} to ${restore_dest}. Check log: ${restore_log}"
+        fi
+    ) > "$restore_log" 2>&1 &
+    
+    echo -e "${C_GREEN}✅ Restore job launched in the background. You will receive a notification upon completion.${C_RESET}"
+}
+
+run_sync_restore() {
+    log_message "Starting synchronous restore."
+    local restore_dest="$2"
+    
+    if _run_restore_command "$@"; then
+        _handle_restore_ownership "$restore_dest"
+        
+        log_message "Sync-restore SUCCESS."
+        send_notification "Sync Restore SUCCESS: $HOSTNAME" "white_check_mark" \
+            "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully completed synchronous restore."
+        return 0
+    else
+        log_message "Sync-restore FAILED."
+        send_notification "Sync Restore FAILED: $HOSTNAME" "x" \
+            "${NTFY_PRIORITY_FAILURE}" "failure" "Synchronous restore failed. Check the logs for details."
+        return 1
+    fi
 }
 
 run_snapshots_delete() {
@@ -1415,7 +1513,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --fix-permissions)
-      if ! [ -t 1 ]; then
+      if ! [ -t 0 ]; then
         echo -e "${C_RED}ERROR: The --fix-permissions flag can only be used in an interactive session.${C_RESET}" >&2
         exit 1
       fi
@@ -1493,6 +1591,28 @@ case "${1:-}" in
     --restore)
         run_preflight_checks "restore" "quiet"
         run_restore
+        ;;
+    --background-restore)
+        shift
+        run_preflight_checks "restore" "quiet"
+        run_background_restore "$@"
+        ;;
+    --sync-restore)
+        shift
+        run_preflight_checks "restore" "quiet"
+        log_message "=== Starting sync-restore run ==="
+        restore_exit_code=0
+        if ! run_sync_restore "$@"; then
+            restore_exit_code=1
+        fi
+        log_message "=== Sync-restore run completed ==="
+        # --- Ping Healthchecks.io (Success or Failure) ---
+        if [ "$restore_exit_code" -eq 0 ] && [[ -n "${HEALTHCHECKS_URL:-}" ]]; then
+            curl -fsS -m 15 --retry 3 "${HEALTHCHECKS_URL}" >/dev/null 2>>"$LOG_FILE"
+        elif [ "$restore_exit_code" -ne 0 ] && [[ -n "${HEALTHCHECKS_URL:-}" ]]; then
+            curl -fsS -m 15 --retry 3 "${HEALTHCHECKS_URL}/fail" >/dev/null 2>>"$LOG_FILE"
+        fi
+        exit "$restore_exit_code"
         ;;
     --check)
         run_preflight_checks "backup" "quiet"
