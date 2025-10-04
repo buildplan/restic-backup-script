@@ -92,7 +92,7 @@ display_update_info() {
 
 check_and_install_restic() {
     echo -e "${C_BOLD}--- Checking Restic Version ---${C_RESET}"
-    if ! command -v bzip2 &>/dev/null || ! command -v curl &>/dev/null || ! command -v gpg &>/dev/null || ! command -v jq &>/dev/null; then
+    if ! command -v less &>/dev/null || ! command -v bzip2 &>/dev/null || ! command -v curl &>/dev/null || ! command -v gpg &>/dev/null || ! command -v jq &>/dev/null; then
         echo
         echo -e "${C_RED}ERROR: 'less', 'bzip2', 'curl', 'gpg', and 'jq' are required for secure auto-installation.${C_RESET}" >&2
         echo
@@ -1092,7 +1092,7 @@ run_uninstall_scheduler() {
 
 get_verbosity_flags() {
     local effective_log_level="${LOG_LEVEL:-1}"
-    if [[ "${VERBOSE_MODE}" == "true" ]]; then
+    if [[ "${VERBOSE_MODE:-}" == "true" ]]; then
         effective_log_level=2 # Force verbose level 2 when --verbose is used
     fi
     local flags=()
@@ -1513,7 +1513,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --fix-permissions)
-      if ! [ -t 1 ]; then
+      if ! [ -t 0 ]; then
         echo -e "${C_RED}ERROR: The --fix-permissions flag can only be used in an interactive session.${C_RESET}" >&2
         exit 1
       fi
