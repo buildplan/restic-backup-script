@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.38 - 2025.10.04
+#         Restic Backup Script v0.38.1 - 2025.10.05
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.38"
+SCRIPT_VERSION="0.38.1"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -1272,12 +1272,29 @@ run_restore() {
         echo -e "${C_RED}Error: Must be a non-empty, absolute path. Aborting.${C_RESET}" >&2
         return 0
     fi
-    if [[ "$restore_dest" == "/" || "$restore_dest" == "/etc" || "$restore_dest" == "/usr" ]]; then
-        read -p "${C_RED}WARNING: You are restoring to a critical system directory ('$restore_dest')${C_RESET}. This is highly unusual and could damage your system. Are you absolutely sure? (y/n): " confirm_dangerous_restore
-        if [[ "${confirm_dangerous_restore,,}" != "y" ]]; then
-            echo "Restore cancelled."
+    #--- Dangerous Restore Confirmation ---
+    local -a critical_dirs=("/" "/bin" "/boot" "/dev" "/etc" "/lib" "/lib64" "/proc" "/root" "/run" "/sbin" "/sys" "/usr" "/var/lib" "/var/log")
+    if [[ -n "${ADDITIONAL_CRITICAL_DIRS:-}" ]]; then
+        read -ra additional_dirs <<< "$ADDITIONAL_CRITICAL_DIRS"
+        critical_dirs+=("${additional_dirs[@]}")
+    fi
+    local is_critical=false
+    for dir in "${critical_dirs[@]}"; do
+        if [[ "$restore_dest" == "$dir" || "$restore_dest" == "$dir"/* ]]; then
+            is_critical=true
+            break
+        fi
+    done
+    if [[ "$is_critical" == "true" ]]; then
+        echo -e "\n${C_RED}${C_BOLD}WARNING: Restoring to critical system directory '$restore_dest'${C_RESET}"
+        echo -e "${C_RED}This could damage your system or make it unbootable!${C_RESET}"
+        local confirm
+        read -p "${C_YELLOW}Type 'DANGEROUS' to proceed or anything else to cancel: ${C_RESET}" confirm
+        if [[ "$confirm" != "DANGEROUS" ]]; then
+            echo -e "${C_GREEN}Restore cancelled for safety.${C_RESET}"
             return 0
         fi
+        log_message "WARNING: User confirmed dangerous restore to: $restore_dest"
     fi
     local include_paths=()
     read -p "Optional: Enter specific file(s) to restore, separated by spaces (leave blank for full restore): " -a include_paths
