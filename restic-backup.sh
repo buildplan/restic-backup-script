@@ -1274,6 +1274,10 @@ run_restore() {
     fi
     #--- Dangerous Restore Confirmation ---
     local -a critical_dirs=("/" "/bin" "/boot" "/dev" "/etc" "/lib" "/lib64" "/proc" "/root" "/run" "/sbin" "/sys" "/usr" "/var/lib" "/var/log")
+    if [[ -n "${ADDITIONAL_CRITICAL_DIRS:-}" ]]; then
+        read -ra additional_dirs <<< "$ADDITIONAL_CRITICAL_DIRS"
+        critical_dirs+=("${additional_dirs[@]}")
+    fi
     local is_critical=false
     for dir in "${critical_dirs[@]}"; do
         if [[ "$restore_dest" == "$dir" || "$restore_dest" == "$dir"/* ]]; then
