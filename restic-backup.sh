@@ -479,14 +479,21 @@ run_unlock() {
 }
 
 run_ls() {
-    local snapshot_id="${1:-latest}"
-    shift 1
+    local snapshot_id="latest"
+    local -a filter_paths=()
+    if [[ $# -gt 0 ]] && [[ "$1" != /* ]]; then
+        snapshot_id="$1"
+        shift 1
+    fi
+    if [ $# -gt 0 ]; then
+        filter_paths=("$@")
+    fi
     echo -e "${C_BOLD}--- Listing Contents of Snapshot: ${snapshot_id} ---${C_RESET}"
     log_message "Listing contents of snapshot ${snapshot_id}"
     local ls_cmd=(restic ls -l "$snapshot_id")
-    if [ $# -gt 0 ]; then
-        echo -e "${C_DIM}Filtering by path(s): $@${C_RESET}"
-        ls_cmd+=("$@")
+    if [ ${#filter_paths[@]} -gt 0 ]; then
+        echo -e "${C_DIM}Filtering by path(s): ${filter_paths[*]}${C_RESET}"
+        ls_cmd+=("${filter_paths[@]}")
     fi
     echo -e "${C_DIM}Displaying snapshot contents (use arrow keys to scroll, 'q' to quit)...${C_RESET}"
     if ! "${ls_cmd[@]}" | less -f; then
@@ -1625,8 +1632,8 @@ case "${1:-}" in
         run_snapshots
         ;;
     --ls)
-        shift
         run_preflight_checks "backup" "quiet"
+        shift
         run_ls "$@"
         ;;
     --restore)
