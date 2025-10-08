@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.38.1 - 2025.10.05
+#         Restic Backup Script v0.38.2 - 2025.10.08
 # =================================================================
 
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.38.1"
+SCRIPT_VERSION="0.38.2"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -302,6 +302,7 @@ display_help() {
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Apply retention policy; optionally prune."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--unlock" "Remove stale repository locks."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--restore" "Interactive restore wizard."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--ls <snapshot_id>" "List files and directories inside a specific snapshot."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--background-restore" "Run a non-interactive restore in the background."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--sync-restore" "Run a non-interactive restore in the foreground (for cron)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dry-run" "Preview backup changes (no snapshot)."
@@ -314,6 +315,7 @@ display_help() {
     echo -e "  Verbose diff summary:        ${C_GREEN}sudo $prog --verbose --diff${C_RESET}"
     echo -e "  Fix perms (interactive):     ${C_GREEN}sudo $prog --fix-permissions --test${C_RESET}"
     echo -e "  Background restore:          ${C_GREEN}sudo $prog --background-restore latest /mnt/restore${C_RESET}"
+    echo -e "  List snapshot contents:      ${C_GREEN}sudo $prog --ls latest /path/to/dir${C_RESET}"
     echo
     echo -e "${C_BOLD}${C_YELLOW}DEPENDENCIES:${C_RESET}"
     echo -e "  This script requires: ${C_GREEN}restic, curl, gpg, bzip2, less, jq, flock${C_RESET}"
@@ -472,6 +474,30 @@ run_unlock() {
     else
         echo -e "${C_RED}❌ Failed to unlock repository.${C_RESET}" >&2
         log_message "ERROR: Failed to unlock repository."
+        return 1
+    fi
+}
+
+run_ls() {
+    local snapshot_id="latest"
+    local -a filter_paths=()
+    if [[ $# -gt 0 ]] && [[ "$1" =~ ^([0-9a-fA-F]{8,64}|latest)$ ]]; then
+        snapshot_id="$1"
+        shift 1
+    fi
+    if [ $# -gt 0 ]; then
+        filter_paths=("$@")
+    fi
+    echo -e "${C_BOLD}--- Listing Contents of Snapshot: ${snapshot_id} ---${C_RESET}"
+    log_message "Listing contents of snapshot ${snapshot_id}"
+    local ls_cmd=(restic ls -l "$snapshot_id")
+    if [ ${#filter_paths[@]} -gt 0 ]; then
+        echo -e "${C_DIM}Filtering by path(s): ${filter_paths[*]}${C_RESET}"
+        ls_cmd+=("${filter_paths[@]}")
+    fi
+    echo -e "${C_DIM}Displaying snapshot contents (use arrow keys to scroll, 'q' to quit)...${C_RESET}"
+    if ! "${ls_cmd[@]}" | less -f; then
+        echo -e "${C_RED}Error: Failed to list contents for snapshot '${snapshot_id}'. Please check the ID and paths.${C_RESET}" >&2
         return 1
     fi
 }
@@ -756,7 +782,7 @@ run_preflight_checks() {
         fi
         if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     fi
-    
+
     # --- Log File Check ---
     if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Log file writability ('$LOG_FILE')..."; fi
     if ! touch "$LOG_FILE" >/dev/null 2>&1; then
@@ -1084,7 +1110,7 @@ run_uninstall_scheduler() {
     if [[ "$was_systemd" == "true" ]]; then
         systemctl daemon-reload
         echo -e "${C_GREEN}✅ systemd timer and service files removed.${C_RESET}"
-    fi   
+    fi
     if [[ "$was_cron" == "true" ]]; then
          echo -e "${C_GREEN}✅ Cron file removed.${C_RESET}"
     fi
@@ -1099,7 +1125,6 @@ get_verbosity_flags() {
     [ "$effective_log_level" -le 0 ] && flags+=(--quiet)
     [ "$effective_log_level" -ge 2 ] && flags+=(--verbose)
     [ "$effective_log_level" -ge 3 ] && flags+=(--verbose)
-    
     echo "${flags[@]}"
 }
 
@@ -1378,33 +1403,25 @@ _run_restore_command() {
     local restore_dest="$2"
     shift 2
     mkdir -p "$restore_dest"
-
-    # Build the command
     local restic_cmd=(restic)
     restic_cmd+=($(get_verbosity_flags))
     restic_cmd+=(restore "$snapshot_id" --target "$restore_dest")
-    
-    # Add optional file paths to include
     if [ $# -gt 0 ]; then
         for path in "$@"; do
             restic_cmd+=(--include "$path")
         done
     fi
-
-    # Execute and return success or failure
     if run_with_priority "${restic_cmd[@]}"; then
-        return 0 # Success
+        return 0
     else
-        return 1 # Failure
+        return 1
     fi
 }
 
 run_background_restore() {
     echo -e "${C_BOLD}--- Background Restore Mode ---${C_RESET}"
-    
     local snapshot_id="${1:?--background-restore requires a snapshot ID}"
     local restore_dest="${2:?--background-restore requires a destination path}"
-    
     if [[ "$snapshot_id" == "latest" ]]; then
         if ! restic snapshots --json | jq 'length > 0' | grep -q true; then
             echo -e "${C_RED}Error: No snapshots exist in the repository. Cannot restore 'latest'. Aborting.${C_RESET}" >&2
@@ -1416,11 +1433,9 @@ run_background_restore() {
         echo -e "${C_RED}Error: Destination must be a non-empty, absolute path. Aborting.${C_RESET}" >&2
         exit 1
     fi
-
     local restore_log="/tmp/restic-restore-${snapshot_id:0:8}-$(date +%s).log"
     echo "Restore job started. Details will be logged to: ${restore_log}"
     log_message "Starting background restore of snapshot ${snapshot_id} to ${restore_dest}. See ${restore_log} for details."
-    
     (
         local start_time=$(date +%s)
         if _run_restore_command "$@"; then
@@ -1439,17 +1454,14 @@ run_background_restore() {
                 "${NTFY_PRIORITY_FAILURE}" "failure" "Failed to restore snapshot ${snapshot_id:0:8} to ${restore_dest}. Check log: ${restore_log}"
         fi
     ) > "$restore_log" 2>&1 &
-    
     echo -e "${C_GREEN}✅ Restore job launched in the background. You will receive a notification upon completion.${C_RESET}"
 }
 
 run_sync_restore() {
     log_message "Starting synchronous restore."
     local restore_dest="$2"
-    
     if _run_restore_command "$@"; then
         _handle_restore_ownership "$restore_dest"
-        
         log_message "Sync-restore SUCCESS."
         send_notification "Sync Restore SUCCESS: $HOSTNAME" "white_check_mark" \
             "${NTFY_PRIORITY_SUCCESS}" "success" "Successfully completed synchronous restore."
@@ -1483,7 +1495,6 @@ run_snapshots_delete() {
         echo "  - $id"
     done
     echo
-
     read -p "Are you absolutely sure you want to PERMANENTLY delete these snapshots? (Type 'yes' to confirm): " confirm
     if [[ "$confirm" != "yes" ]]; then
         echo "Confirmation not received. Aborting deletion."
@@ -1491,7 +1502,6 @@ run_snapshots_delete() {
     fi
     echo -e "${C_BOLD}--- Deleting Snapshots ---${C_RESET}"
     log_message "User initiated deletion of snapshots: ${ids_to_delete[*]}"
-
     if restic forget "${ids_to_delete[@]}"; then
         log_message "Successfully forgot snapshots: ${ids_to_delete[*]}"
         echo -e "${C_GREEN}✅ Snapshots successfully deleted.${C_RESET}"
@@ -1604,6 +1614,11 @@ case "${1:-}" in
     --snapshots)
         run_preflight_checks "backup" "quiet"
         run_snapshots
+        ;;
+    --ls)
+        run_preflight_checks "backup" "quiet"
+        shift
+        run_ls "$@"
         ;;
     --restore)
         run_preflight_checks "restore" "quiet"
