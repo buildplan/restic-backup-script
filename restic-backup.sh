@@ -481,7 +481,7 @@ run_unlock() {
 run_ls() {
     local snapshot_id="latest"
     local -a filter_paths=()
-    if [[ $# -gt 0 ]] && [[ "$1" != /* ]]; then
+    if [[ $# -gt 0 ]] && [[ "$1" =~ ^([0-9a-fA-F]{8,64}|latest)$ ]]; then
         snapshot_id="$1"
         shift 1
     fi
