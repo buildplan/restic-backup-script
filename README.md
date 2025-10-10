@@ -255,16 +255,16 @@ sudo mv restic_* /usr/local/bin/restic
 
 ### Package Breakdown
 
-| Package       | Required For                                                                                                         |
-| :------------ | :------------------------------------------------------------------------------------------------------------------- |
-| **`restic`** | The core backup tool used for all repository operations (backup, restore, check, forget).                            |
-| **`jq`** | Parsing JSON to build diff summaries.                                                                                     |
-| **`curl`** | Notifications and fetching release metadata.                                                                            |
-| **`bzip2`** | Decompressing the Restic binary during auto-install/update.                                                            |
-| **`gnupg`** | `gpg` for verifying the PGP signature of release checksums.                                                            |
-| **`util-linux`** | `flock` to prevent concurrent runs; `ionice` to reduce I/O impact.                                                |
-| **`coreutils`** | Utilities used throughout (e.g., `date`, `grep`, `sed`, `chmod`, `mv`, `mktemp`).                                   |
-| **`less`** | Paging output for `--ls` and restore browsing.                                                                          |
+| Package       | Required For                                                                                   |
+| :------------ | :----------------------------------------------------------------------------------------------|
+| **`restic`** | The core backup tool used for all repository operations (backup, restore, check, forget).       |
+| **`jq`** | Parsing JSON to build diff summaries.                                                               |
+| **`curl`** | Notifications and fetching release metadata.                                                      |
+| **`bzip2`** | Decompressing the Restic binary during auto-install/update.                                      |
+| **`gnupg`** | `gpg` for verifying the PGP signature of release checksums.                                      |
+| **`util-linux`** | `flock` to prevent concurrent runs; `ionice` to reduce I/O impact.                          |
+| **`coreutils`** | Utilities used throughout (e.g., `date`, `grep`, `sed`, `chmod`, `mv`, `mktemp`).            |
+| **`less`** | Paging output for `--ls` and restore browsing.                                                    |
 
 > Note: If you use the rclone backend (e.g., `RESTIC_REPOSITORY="rclone:remote:bucket/path"`), you must install and configure rclone separately.
 
@@ -292,14 +292,14 @@ The most reliable way for the script to connect to a remote server is via an SSH
     sudo ssh-copy-id -p 23 -s u123456-sub4@u123456.your-storagebox.de
     ```
 
-5. **Create an SSH config file** to define an alias for your connection:
+3. **Create an SSH config file** to define an alias for your connection:
 
     ```sh
     # Open the file in an editor
     sudo nano /root/.ssh/config
     ```
 
-6. **Add the following content**, adjusting the details for your server:
+4. **Add the following content**, adjusting the details for your server:
 
     ```bash
     Host storagebox
@@ -311,7 +311,7 @@ The most reliable way for the script to connect to a remote server is via an SSH
         ServerAliveCountMax 240
     ```
 
-7. **Set secure permissions** and test the connection:
+5. **Set secure permissions** and test the connection:
 
     ```sh
     sudo chmod 600 /root/.ssh/config
