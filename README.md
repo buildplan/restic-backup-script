@@ -283,15 +283,23 @@ The most reliable way for the script to connect to a remote server is via an SSH
     (Press Enter through all prompts).
 
 2. **Add your public key** to the remote server's authorized keys. For a Hetzner Storage Box, paste the contents of `sudo cat /root/.ssh/id_ed25519.pub` into the control panel.
+  
+   For Hetzner Storagebox use the `ssh-copy-id` command (replace `u123456` and `u123456-sub4`):
 
-3. **Create an SSH config file** to define an alias for your connection:
+    ```sh
+    # Hetzner Storage Box requires the `-s` flag. Replace `u123456` and `u123456-sub4`
+    
+    sudo ssh-copy-id -p 23 -s u123456-sub4@u123456.your-storagebox.de
+    ```
+
+5. **Create an SSH config file** to define an alias for your connection:
 
     ```sh
     # Open the file in an editor
     sudo nano /root/.ssh/config
     ```
 
-4. **Add the following content**, adjusting the details for your server:
+6. **Add the following content**, adjusting the details for your server:
 
     ```bash
     Host storagebox
@@ -303,7 +311,7 @@ The most reliable way for the script to connect to a remote server is via an SSH
         ServerAliveCountMax 240
     ```
 
-5. **Set secure permissions** and test the connection:
+7. **Set secure permissions** and test the connection:
 
     ```sh
     sudo chmod 600 /root/.ssh/config
