@@ -36,39 +36,39 @@ For those familiar with setting up backup scripts, here is a fast track to get y
 
 1. **Download files**
 
-```sh
-mkdir -p /root/scripts/backup && cd /root/scripts/backup
-curl -LO https://raw.githubusercontent.com/buildplan/restic-backup-script/refs/heads/main/restic-backup.sh
-curl -LO https://raw.githubusercontent.com/buildplan/restic-backup-script/refs/heads/main/restic-backup.conf
-curl -LO https://raw.githubusercontent.com/buildplan/restic-backup-script/refs/heads/main/restic-excludes.txt
-chmod +x restic-backup.sh
-```
+    ```sh
+    mkdir -p /root/scripts/backup && cd /root/scripts/backup
+    curl -LO https://raw.githubusercontent.com/buildplan/restic-backup-script/refs/heads/main/restic-backup.sh
+    curl -LO https://raw.githubusercontent.com/buildplan/restic-backup-script/refs/heads/main/restic-backup.conf
+    curl -LO https://raw.githubusercontent.com/buildplan/restic-backup-script/refs/heads/main/restic-excludes.txt
+    chmod +x restic-backup.sh
+    ```
 
 2. **Edit configuration**
 
-- Update `restic-backup.conf` with repository details, backup sources, and password file.
-- Secure it: `chmod 600 restic-backup.conf`
+    - Update `restic-backup.conf` with repository details, backup sources, and password file.
+    - Secure it: `chmod 600 restic-backup.conf`
 
 3. **Create password and initialize repository**
 
-```sh
-# Create the password file (use a strong, unique password)
-echo 'your-very-secure-password' | sudo tee /root/.restic-password
-sudo chmod 400 /root/.restic-password
+    ```sh
+    # Create the password file (use a strong, unique password)
+    echo 'your-very-secure-password' | sudo tee /root/.restic-password
+    sudo chmod 400 /root/.restic-password
 
-# Initialize the repository
-sudo ./restic-backup.sh --init
-```
+    # Initialize the repository
+    sudo ./restic-backup.sh --init
+    ```
 
 4. **First backup and schedule**
 
-```sh
-# Run the first backup with verbose output
-sudo ./restic-backup.sh --verbose
+    ```sh
+    # Run the first backup with verbose output
+    sudo ./restic-backup.sh --verbose
 
-# Set up a recurring schedule via wizard (systemd or cron)
-sudo ./restic-backup.sh --install-scheduler
-```
+    # Set up a recurring schedule via wizard (systemd or cron)
+    sudo ./restic-backup.sh --install-scheduler
+    ```
 
 > Default log: `/var/log/restic-backup.log`
 
@@ -532,9 +532,6 @@ If you prefer to manage the schedule manually instead of using the wizard, you c
 2. Add the following lines to schedule your backups and maintenance.
 
     ```crontab
-    # Define a safe PATH that includes the location of restic
-    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-
     # Run the Restic backup every day at 3:00 AM
     0 3 * * * /root/scripts/backup/restic-backup.sh > /dev/null 2>&1
  

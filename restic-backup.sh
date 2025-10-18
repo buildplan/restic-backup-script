@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.38.2 - 2025.10.08
+#         Restic Backup Script v0.38.3 - 2025.10.18
 # =================================================================
 
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.38.2"
+SCRIPT_VERSION="0.38.3"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
