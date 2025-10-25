@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.38.3 - 2025.10.18
+#           Restic Backup Script v0.39 - 2025.10.25
 # =================================================================
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -9,7 +9,7 @@ set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.38.3"
+SCRIPT_VERSION="0.39"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
@@ -302,8 +302,10 @@ display_help() {
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check-full" "Verify all repository data (slow)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Apply retention policy; optionally prune."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--unlock" "Remove stale repository locks."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dump <id> <path>" "Dump a single file from a snapshot to stdout."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--restore" "Interactive restore wizard."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--ls <snapshot_id>" "List files and directories inside a specific snapshot."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--find <pattern...>" "Search for files/dirs across all snapshots (e.g., --find \"*.log\" -l)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--background-restore" "Run a non-interactive restore in the background."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--sync-restore" "Run a non-interactive restore in the foreground (for cron)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dry-run" "Preview backup changes (no snapshot)."
@@ -329,7 +331,8 @@ display_help() {
 
 log_message() {
     local message="$1"
-    local timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
+    local timestamp
+    timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
     echo "[$HOSTNAME] [$timestamp] $message" >> "$LOG_FILE"
 
     if [[ "${VERBOSE_MODE:-false}" == "true" ]]; then
@@ -503,6 +506,37 @@ run_ls() {
     fi
 }
 
+run_find() {
+    if [ $# -eq 0 ]; then
+        echo -e "${C_RED}Error: --find requires a pattern to search for.${C_RESET}" >&2
+        echo -e "Example: ${C_GREEN}sudo $prog --find \"*.log\" -l -i${C_RESET}" >&2
+        return 1
+    fi
+    echo -e "${C_BOLD}--- Finding Files (searching all snapshots) ---${C_RESET}"
+    log_message "Running find with patterns: $@"
+    echo -e "${C_DIM}Searching... (use arrow keys to scroll, 'q' to quit)...${C_RESET}"    
+    if ! restic find "$@" | less -f; then
+        echo -e "${C_RED}Error: Find command failed. Check your pattern(s).${C_RESET}" >&2
+        return 1
+    fi
+}
+
+run_dump() {
+    if [ $# -ne 2 ]; then
+        echo -e "${C_RED}Error: --dump requires <snapshot_id> and <path>.${C_RESET}" >&2
+        echo -e "Example: ${C_GREEN}sudo $prog --dump latest /etc/hosts > hosts.txt${C_RESET}" >&2
+        return 1
+    fi
+    local snapshot_id="$1"
+    local file_path="$2"
+    log_message "Dumping file: $file_path from snapshot $snapshot_id"    
+    if ! restic dump "$snapshot_id" "$file_path"; then
+        log_message "ERROR: Failed to dump file $file_path from $snapshot_id"
+        echo -e "${C_RED}❌ Failed to dump file. Check snapshot ID and path.${C_RESET}" >&2
+        return 1
+    fi
+}
+
 send_ntfy() {
     local title="$1"
     local tags="$2"
@@ -534,8 +568,9 @@ send_discord() {
         failure) color=15158332 ;;
         *) color=9807270 ;;
     esac
-    local escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
-    local escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+    local escaped_title escaped_message
+    escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
+    escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
     local json_payload
     printf -v json_payload '{"embeds": [{"title": "%s", "description": "%s", "color": %d, "timestamp": "%s"}]}' \
         "$escaped_title" "$escaped_message" "$color" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
@@ -612,8 +647,9 @@ send_slack() {
         failure) color="#d50200" ;;
         *) color="#808080" ;;
     esac
-    local escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
-    local escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+    local escaped_title escaped_message
+    escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
+    escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
     local json_payload
     printf -v json_payload '{
         "attachments": [
@@ -1625,6 +1661,11 @@ case "${1:-}" in
         run_preflight_checks "restore" "quiet"
         run_restore
         ;;
+    --dump)
+        run_preflight_checks "restore" "quiet"
+        shift
+        run_dump "$@"
+        ;;
     --background-restore)
         shift
         run_preflight_checks "restore" "quiet"
@@ -1666,6 +1707,11 @@ case "${1:-}" in
     --snapshots-delete)
         run_preflight_checks "backup" "quiet"
         run_snapshots_delete
+        ;;
+    --find)
+        run_preflight_checks "backup" "quiet"
+        shift
+        run_find "$@"
         ;;
     --stats)
         run_preflight_checks "backup" "quiet"
