@@ -505,7 +505,8 @@ run_ls() {
     fi
     echo -e "${C_DIM}Displaying snapshot contents (use arrow keys to scroll, 'q' to quit)...${C_RESET}"
     "${ls_cmd[@]}" | less -fR
-    if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+    local ls_status; ls_status=${PIPESTATUS[0]}
+    if [ "$ls_status" -ne 0 ]; then
         echo -e "${C_RED}Error: Failed to list contents for snapshot '${snapshot_id}'. Please check the ID and paths.${C_RESET}" >&2
         return 1
     fi
@@ -522,7 +523,8 @@ run_find() {
     echo -e "${C_DIM}Searching... (use arrow keys to scroll, 'q' to quit)...${C_RESET}"
     local find_stderr; find_stderr=$(mktemp)
     restic find "$@" 2> >(tee "$find_stderr" >&2) | less -fR
-    if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+    local restic_find_status; restic_find_status=${PIPESTATUS[0]}
+    if [ "$restic_find_status" -ne 0 ]; then
         echo -e "${C_RED}Error: Find command failed.${C_RESET}" >&2
         if [ -s "$find_stderr" ]; then
             echo -e "${C_YELLOW}--- restic error output ---${C_RESET}" >&2
@@ -1593,8 +1595,12 @@ recovery_kit() {
     local recovery_file backup_sources_str
     recovery_file="${SCRIPT_DIR}/restic-recovery-kit-${HOSTNAME}-$(date +%Y%m%d).sh"
     backup_sources_str="${BACKUP_SOURCES[*]}"
-    
-    cat > "$recovery_file" << EOF
+    local tmpfile
+    tmpfile=$(mktemp) || {
+        echo -e "${C_RED}ERROR: Could not create temporary file for recovery kit.${C_RESET}" >&2
+        return 1
+    }
+    cat > "$tmpfile" << EOF
 #!/usr/bin/env bash
 # =================================================================
 #            --- Restic Emergency Recovery Kit ---
@@ -1609,7 +1615,7 @@ recovery_kit() {
 #    (e.g.,) curl -L https://github.com/restic/restic/releases/latest/download/restic_latest_linux_amd64.bz2 | bunzip2 > restic
 #    (e.g.,) chmod +x restic && sudo mv restic /usr/local/bin/
 #
-# 2. Make this script executable: chmod +x $recovery_file
+# 2. Make this script executable: chmod +x ${recovery_file##*/}
 # 3. Run this script OR manually export the variables.
 # 4. Restore your data.
 
@@ -1636,8 +1642,8 @@ echo "To restore a specific directory from the latest snapshot:"
 # restic restore latest --target /mnt/restore --include "/home/user_files"
 
 EOF
-    
-    chmod 400 "$recovery_file"
+    chmod 400 "$tmpfile"    
+    mv -f "$tmpfile" "$recovery_file"
     echo -e "\n${C_GREEN}✅ Recovery Kit generated: ${C_BOLD}${recovery_file}${C_RESET}"
     echo -e "${C_BOLD}${C_RED}WARNING: This file contains your repository password.${C_RESET}"
     echo -e "${C_YELLOW}Store this file securely and OFFLINE (e.g., encrypted USB, password manager).${C_RESET}"
