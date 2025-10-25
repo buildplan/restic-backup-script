@@ -88,6 +88,7 @@ For those familiar with setting up backup scripts, here is a fast track to get y
 - `sudo ./restic-backup.sh --install-scheduler` — Interactive schedule wizard (systemd/cron).
 - `sudo ./restic-backup.sh --uninstall-scheduler` — Remove the installed schedule.
 - `sudo ./restic-backup.sh --restore` — Interactive restore wizard with dry-run preview.
+- `sudo ./restic-backup.sh --dump <id> <path>` - Dump a single file from a snapshot to stdout.
 - `sudo ./restic-backup.sh --background-restore <snapshot> <dest>` — Non-blocking background restore (logs to /tmp).
 - `sudo ./restic-backup.sh --sync-restore <snapshot> <dest>` — Blocking restore suitable for cron/automation.
 - `sudo ./restic-backup.sh --forget` — Apply retention policy (optionally prunes).
@@ -97,6 +98,8 @@ For those familiar with setting up backup scripts, here is a fast track to get y
 - `sudo ./restic-backup.sh --snapshots` — List snapshots.
 - `sudo ./restic-backup.sh --snapshots-delete` — Interactively delete snapshots (irreversible).
 - `sudo ./restic-backup.sh --ls [snapshot_id] [path ...]` — List files/dirs within a snapshot (paged with `less`).
+- `sudo ./restic-backup.sh --find <pattern...>` - Search for files/dirs across all snapshots (e.g., --find \"*.log\" -l).
+- `sudo ./restic-backup.sh --recovery-kit` - Generate a self-contained recovery script (with embedded password).
 
 Tip: `--verbose` is interactive; cron should use the default quiet mode. The script auto-reexecs with sudo if not run as root.
 
