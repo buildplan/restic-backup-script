@@ -548,6 +548,8 @@ run_dump() {
         echo -e "${C_RED}❌ Failed to dump file. Check snapshot ID and path.${C_RESET}" >&2
         return 1
     fi
+    echo -e "${C_GREEN}✅ Successfully dumped:${C_RESET} ${C_BOLD}${file_path}${C_RESET} ${C_GREEN}from snapshot${C_RESET} ${C_BOLD}${snapshot_id}${C_RESET}" >&2
+    echo -e "${C_DIM}   (File content was sent to stdout for redirection)${C_RESET}" >&2
 }
 
 send_ntfy() {
