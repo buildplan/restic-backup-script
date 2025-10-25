@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#         Restic Backup Script v0.38.3 - 2025.10.18
+#           Restic Backup Script v0.39 - 2025.10.25
 # =================================================================
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -9,8 +9,9 @@ set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.38.3"
+SCRIPT_VERSION="0.39"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+PROG_NAME=$(basename "$0"); readonly PROG_NAME
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
 LOCK_FILE="/tmp/restic-backup.lock"
 HOSTNAME=$(hostname -s)
@@ -127,7 +128,7 @@ check_and_install_restic() {
     display_update_info "Restic" "$local_version" "$latest_version" "$release_notes"
 
     if [ -t 1 ]; then
-        read -p "Would you like to download and install it? (y/n): " confirm
+        read -rp "Would you like to download and install it? (y/n): " confirm
         if [[ "${confirm,,}" != "y" && "${confirm,,}" != "yes" ]]; then
             echo "Skipping installation."
             return 0
@@ -193,7 +194,7 @@ check_for_script_update() {
         echo -e "${C_YELLOW}Skipping script update check: 'jq' command not found.${C_RESET}"
         return 0
     fi
-    echo -e "${C_BOLD}--- Checking for script updates ---${C_RESET}"    
+    echo -e "${C_BOLD}--- Checking for script updates ---${C_RESET}"
     local SCRIPT_API_URL="https://api.github.com/repos/buildplan/restic-backup-script/releases/latest"
     local release_info
     release_info=$(curl -sL -H "Cache-Control: no-cache" -H "Pragma: no-cache" "$SCRIPT_API_URL")
@@ -257,6 +258,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
     echo -e "${C_RED}ERROR: Configuration file not found: $CONFIG_FILE${C_RESET}" >&2
     exit 1
 fi
+# shellcheck source=restic-backup.conf
 source "$CONFIG_FILE"
 REQUIRED_VARS=(
     "RESTIC_REPOSITORY"
@@ -277,14 +279,12 @@ done
 
 display_help() {
     local readme_url="https://github.com/buildplan/restic-backup-script/blob/main/README.md"
-    local prog
-    prog=$(basename "$0")
 
     echo -e "${C_BOLD}${C_CYAN}Restic Backup Script (v${SCRIPT_VERSION})${C_RESET}"
     echo "Encrypted, deduplicated backups with restic."
     echo
     echo -e "${C_BOLD}${C_YELLOW}USAGE:${C_RESET}"
-    echo -e "  sudo $prog ${C_GREEN}[options] [command]${C_RESET}"
+    echo -e "  sudo $PROG_NAME ${C_GREEN}[options] [command]${C_RESET}"
     echo
     echo -e "${C_BOLD}${C_YELLOW}OPTIONS:${C_RESET}"
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--verbose" "Show detailed live output."
@@ -302,21 +302,26 @@ display_help() {
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check-full" "Verify all repository data (slow)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Apply retention policy; optionally prune."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--unlock" "Remove stale repository locks."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dump <id> <path>" "Dump a single file from a snapshot to stdout."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--restore" "Interactive restore wizard."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--ls <snapshot_id>" "List files and directories inside a specific snapshot."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--find <pattern...>" "Search for files/dirs across all snapshots (e.g., --find \"*.log\" -l)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--background-restore" "Run a non-interactive restore in the background."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--sync-restore" "Run a non-interactive restore in the foreground (for cron)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dry-run" "Preview backup changes (no snapshot)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--test" "Validate config, permissions, connectivity."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--install-scheduler" "Install an automated schedule (systemd/cron)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--recovery-kit" "Generate a self-contained recovery script (with embedded password)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--uninstall-scheduler" "Remove an automated schedule."
     echo
     echo -e "${C_BOLD}${C_YELLOW}QUICK EXAMPLES:${C_RESET}"
-    echo -e "  Run a backup now:            ${C_GREEN}sudo $prog${C_RESET}"
-    echo -e "  Verbose diff summary:        ${C_GREEN}sudo $prog --verbose --diff${C_RESET}"
-    echo -e "  Fix perms (interactive):     ${C_GREEN}sudo $prog --fix-permissions --test${C_RESET}"
-    echo -e "  Background restore:          ${C_GREEN}sudo $prog --background-restore latest /mnt/restore${C_RESET}"
-    echo -e "  List snapshot contents:      ${C_GREEN}sudo $prog --ls latest /path/to/dir${C_RESET}"
+    echo -e "  Run a backup now:            ${C_GREEN}sudo $PROG_NAME${C_RESET}"
+    echo -e "  Verbose diff summary:        ${C_GREEN}sudo $PROG_NAME --verbose --diff${C_RESET}"
+    echo -e "  Fix perms (interactive):     ${C_GREEN}sudo $PROG_NAME --fix-permissions --test${C_RESET}"
+    echo -e "  Background restore:          ${C_GREEN}sudo $PROG_NAME --background-restore latest /mnt/restore${C_RESET}"
+    echo -e "  List snapshot contents:      ${C_GREEN}sudo $PROG_NAME --ls latest /path/to/dir${C_RESET}"
+    echo -e "  Find a file everywhere:      ${C_GREEN}sudo $PROG_NAME --find \"*.log\" -l${C_RESET}"
+    echo -e "  Dump one file to stdout:     ${C_GREEN}sudo $PROG_NAME --dump latest /etc/hosts > hosts.txt${C_RESET}"
     echo
     echo -e "${C_BOLD}${C_YELLOW}DEPENDENCIES:${C_RESET}"
     echo -e "  This script requires: ${C_GREEN}restic, curl, gpg, bzip2, less, jq, flock${C_RESET}"
@@ -324,12 +329,14 @@ display_help() {
     echo -e "Config: ${C_DIM}${CONFIG_FILE}${C_RESET}  Log: ${C_DIM}${LOG_FILE}${C_RESET}"
     echo
     echo -e "For full details, see the online documentation: \e]8;;${readme_url}\a${C_CYAN}README.md${C_RESET}\e]8;;\a"
+    echo -e "${C_YELLOW}Note:${C_RESET} For restic official documentation See: https://restic.readthedocs.io/"
     echo
 }
 
 log_message() {
     local message="$1"
-    local timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
+    local timestamp
+    timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
     echo "[$HOSTNAME] [$timestamp] $message" >> "$LOG_FILE"
 
     if [[ "${VERBOSE_MODE:-false}" == "true" ]]; then
@@ -459,7 +466,7 @@ run_unlock() {
     if [ -n "$other_processes" ]; then
         echo -e "${C_YELLOW}WARNING: Another restic process appears to be running:${C_RESET}"
         echo "$other_processes"
-        read -p "Are you sure you want to proceed? This could interrupt a live backup. (y/n): " confirm
+        read -rp "Are you sure you want to proceed? This could interrupt a live backup. (y/n): " confirm
         if [[ "${confirm,,}" != "y" && "${confirm,,}" != "yes" ]]; then
             echo "Unlock cancelled by user."
             log_message "Unlock cancelled by user due to active processes."
@@ -497,10 +504,55 @@ run_ls() {
         ls_cmd+=("${filter_paths[@]}")
     fi
     echo -e "${C_DIM}Displaying snapshot contents (use arrow keys to scroll, 'q' to quit)...${C_RESET}"
-    if ! "${ls_cmd[@]}" | less -f; then
+    "${ls_cmd[@]}" | less -fR
+    local ls_status; ls_status=${PIPESTATUS[0]}
+    if [ "$ls_status" -ne 0 ]; then
         echo -e "${C_RED}Error: Failed to list contents for snapshot '${snapshot_id}'. Please check the ID and paths.${C_RESET}" >&2
         return 1
     fi
+}
+
+run_find() {
+    if [ $# -eq 0 ]; then
+        echo -e "${C_RED}Error: --find requires a pattern to search for.${C_RESET}" >&2
+        echo -e "Example: ${C_GREEN}sudo $PROG_NAME --find \"*.log\" -l -i${C_RESET}" >&2
+        return 1
+    fi
+    echo -e "${C_BOLD}--- Finding Files (searching all snapshots) ---${C_RESET}"
+    log_message "Running find with patterns: $*"
+    echo -e "${C_DIM}Searching... (use arrow keys to scroll, 'q' to quit)...${C_RESET}"
+    local find_stderr; find_stderr=$(mktemp)
+    restic find "$@" 2> >(tee "$find_stderr" >&2) | less -fR
+    local restic_find_status; restic_find_status=${PIPESTATUS[0]}
+    if [ "$restic_find_status" -ne 0 ]; then
+        echo -e "${C_RED}Error: Find command failed.${C_RESET}" >&2
+        if [ -s "$find_stderr" ]; then
+            echo -e "${C_YELLOW}--- restic error output ---${C_RESET}" >&2
+            cat "$find_stderr" >&2
+            echo -e "${C_YELLOW}--------------------------${C_RESET}" >&2
+        fi
+        rm -f "$find_stderr"
+        return 1
+    fi
+    rm -f "$find_stderr"
+}
+
+run_dump() {
+    if [ $# -ne 2 ]; then
+        echo -e "${C_RED}Error: --dump requires <snapshot_id> and <path>.${C_RESET}" >&2
+        echo -e "Example: ${C_GREEN}sudo $PROG_NAME --dump latest /etc/hosts > hosts.txt${C_RESET}" >&2
+        return 1
+    fi
+    local snapshot_id="$1"
+    local file_path="$2"
+    log_message "Dumping file: $file_path from snapshot $snapshot_id"
+    if ! restic dump "$snapshot_id" "$file_path"; then
+        log_message "ERROR: Failed to dump file $file_path from $snapshot_id"
+        echo -e "${C_RED}❌ Failed to dump file. Check snapshot ID and path.${C_RESET}" >&2
+        return 1
+    fi
+    echo -e "${C_GREEN}✅ Successfully dumped:${C_RESET} ${C_BOLD}${file_path}${C_RESET} ${C_GREEN}from snapshot${C_RESET} ${C_BOLD}${snapshot_id}${C_RESET}" >&2
+    echo -e "${C_DIM}   (File content was sent to stdout for redirection)${C_RESET}" >&2
 }
 
 send_ntfy() {
@@ -534,8 +586,9 @@ send_discord() {
         failure) color=15158332 ;;
         *) color=9807270 ;;
     esac
-    local escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
-    local escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+    local escaped_title escaped_message
+    escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
+    escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
     local json_payload
     printf -v json_payload '{"embeds": [{"title": "%s", "description": "%s", "color": %d, "timestamp": "%s"}]}' \
         "$escaped_title" "$escaped_message" "$color" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
@@ -600,7 +653,7 @@ send_teams() {
 
 send_slack() {
     local title="$1"
-    local status="$2" 
+    local status="$2"
     local message="$3"
     if [[ "${SLACK_ENABLED:-false}" != "true" ]] || [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
         return 0
@@ -612,8 +665,9 @@ send_slack() {
         failure) color="#d50200" ;;
         *) color="#808080" ;;
     esac
-    local escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
-    local escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+    local escaped_title escaped_message
+    escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
+    escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
     local json_payload
     printf -v json_payload '{
         "attachments": [
@@ -878,14 +932,14 @@ run_install_scheduler() {
     echo -e "  1) ${C_GREEN}systemd timer${C_RESET} (Modern, recommended, more flexible logging)"
     echo -e "  2) ${C_CYAN}crontab${C_RESET}       (Classic, simple, universally available)"
     local scheduler_choice
-    read -p "Enter your choice [1]: " scheduler_choice
+    read -rp "Enter your choice [1]: " scheduler_choice
     scheduler_choice=${scheduler_choice:-1}
     echo -e "\n${C_YELLOW}How often would you like the backup to run?${C_RESET}"
     echo -e "  1) ${C_GREEN}Once daily${C_RESET}"
     echo -e "  2) ${C_GREEN}Twice daily${C_RESET} (e.g., every 12 hours)"
     echo -e "  3) ${C_CYAN}Custom schedule${C_RESET} (provide your own expression)"
     local schedule_choice
-    read -p "Enter your choice [1]: " schedule_choice
+    read -rp "Enter your choice [1]: " schedule_choice
     schedule_choice=${schedule_choice:-1}
 
     local systemd_schedule cron_schedule
@@ -893,7 +947,7 @@ run_install_scheduler() {
         1)
             local daily_time
             while true; do
-                read -p "Enter the time to run the backup (24-hour HH:MM format) [03:00]: " daily_time
+                read -rp "Enter the time to run the backup (24-hour HH:MM format) [03:00]: " daily_time
                 daily_time=${daily_time:-03:00}
                 if [[ "$daily_time" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then break; else echo -e "${C_RED}Invalid format. Please use HH:MM.${C_RESET}"; fi
             done
@@ -904,12 +958,12 @@ run_install_scheduler() {
         2)
             local time1 time2
             while true; do
-                read -p "Enter the first time (24-hour HH:MM format) [03:00]: " time1
+                read -rp "Enter the first time (24-hour HH:MM format) [03:00]: " time1
                 time1=${time1:-03:00}
                 if [[ "$time1" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then break; else echo -e "${C_RED}Invalid format. Please use HH:MM.${C_RESET}"; fi
             done
             while true; do
-                read -p "Enter the second time (24-hour HH:MM format) [15:30]: " time2
+                read -rp "Enter the second time (24-hour HH:MM format) [15:30]: " time2
                 time2=${time2:-15:30}
                 if [[ "$time2" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; then break; else echo -e "${C_RED}Invalid format. Please use HH:MM.${C_RESET}"; fi
             done
@@ -920,13 +974,13 @@ run_install_scheduler() {
             ;;
         3)
             if [[ "$scheduler_choice" == "1" ]]; then
-                read -p "Enter a custom systemd 'OnCalendar' expression: " systemd_schedule
+                read -rp "Enter a custom systemd 'OnCalendar' expression: " systemd_schedule
                 if command -v systemd-analyze >/dev/null && ! systemd-analyze calendar "$systemd_schedule" --iterations=1 >/dev/null 2>&1; then
                     echo -e "${C_RED}Warning: '$systemd_schedule' may be an invalid expression.${C_RESET}"
                 fi
             else
                 while true; do
-                    read -p "Enter a custom cron expression (e.g., '0 4 * * *'): " cron_schedule
+                    read -rp "Enter a custom cron expression (e.g., '0 4 * * *'): " cron_schedule
                     if echo "$cron_schedule" | grep -qE '^([0-9*,/-]+\s){4}[0-9*,/-]+$'; then
                         break
                     else
@@ -945,14 +999,14 @@ run_install_scheduler() {
         echo -e "  ${C_DIM}Scheduler:${C_RESET}   systemd timer"
         printf "  ${C_DIM}Schedule:%b\n%s${C_RESET}\n" "${C_RESET}" "$systemd_schedule"
         echo
-        read -p "Proceed with installation? (y/n): " confirm
+        read -rp "Proceed with installation? (y/n): " confirm
         if [[ "${confirm,,}" != "y" ]]; then echo "Aborted."; return 1; fi
         install_systemd_timer "$script_path" "$systemd_schedule" "$CONFIG_FILE"
     else
         echo -e "  ${C_DIM}Scheduler:${C_RESET}   crontab"
         printf "  ${C_DIM}Schedule:%b\n%s${C_RESET}\n" "${C_RESET}" "$cron_schedule"
         echo
-        read -p "Proceed with installation? (y/n): " confirm
+        read -rp "Proceed with installation? (y/n): " confirm
         if [[ "${confirm,,}" != "y" ]]; then echo "Aborted."; return 1; fi
         install_crontab "$script_path" "$cron_schedule" "$LOG_FILE"
     fi
@@ -966,7 +1020,7 @@ install_systemd_timer() {
     local timer_file="/etc/systemd/system/restic-backup.timer"
 
     if [ -f "$service_file" ] || [ -f "$timer_file" ]; then
-        read -p "Existing systemd files found. Overwrite? (y/n): " confirm
+        read -rp "Existing systemd files found. Overwrite? (y/n): " confirm
         if [[ "${confirm,,}" != "y" ]]; then echo "Aborted."; return 1; fi
     fi
     echo "Creating systemd service file: $service_file"
@@ -1023,7 +1077,7 @@ install_crontab() {
         echo -e "${C_YELLOW}Existing cron file found at $cron_file:${C_RESET}"
         cat "$cron_file"
         echo
-        read -p "Add new schedule(s) to this file? (y/n): " confirm
+        read -rp "Add new schedule(s) to this file? (y/n): " confirm
         if [[ "${confirm,,}" != "y" ]]; then
             echo "Aborted."
             return 1
@@ -1096,7 +1150,7 @@ run_uninstall_scheduler() {
         echo "  - $file"
     done
     echo
-    read -p "Are you sure you want to proceed? (y/n): " confirm
+    read -rp "Are you sure you want to proceed? (y/n): " confirm
     if [[ "${confirm,,}" != "y" ]]; then
         echo "Aborted by user."
         return 0
@@ -1180,12 +1234,12 @@ run_stats() {
 }
 
 run_backup() {
-    local start_time=$(date +%s)
+    local start_time; start_time=$(date +%s)
     echo -e "${C_BOLD}--- Starting Backup ---${C_RESET}"
     log_message "Starting backup of: ${BACKUP_SOURCES[*]}"
     local backup_cmd=()
     mapfile -t backup_cmd < <(build_backup_command)
-    local backup_log=$(mktemp)
+    local backup_log; backup_log=$(mktemp)
     local backup_success=false
     if run_with_priority "${backup_cmd[@]}" 2>&1 | tee "$backup_log"; then
         backup_success=true
@@ -1201,8 +1255,8 @@ run_backup() {
     fi
     cat "$backup_log" >> "$LOG_FILE"
     rm -f "$backup_log"
-    local end_time=$(date +%s)
-    local duration=$((end_time - start_time))
+    local end_time; end_time=$(date +%s)
+    local duration; duration=$((end_time - start_time))
     if [ "$backup_success" = true ]; then
         log_message "Backup completed successfully"
         echo -e "${C_GREEN}✅ Backup completed${C_RESET}"
@@ -1282,18 +1336,18 @@ run_restore() {
     echo "Available snapshots:"
     restic snapshots --compact
     echo
-    read -p "Enter snapshot ID to restore (or 'latest'): " snapshot_id
+    read -rp "Enter snapshot ID to restore (or 'latest'): " snapshot_id
     if [ -z "$snapshot_id" ]; then
         echo "No snapshot specified, exiting"
         return 0
     fi
     local list_confirm
-    read -p "Would you like to list the contents of this snapshot to find exact paths? (y/n): " list_confirm
+    read -rp "Would you like to list the contents of this snapshot to find exact paths? (y/n): " list_confirm
     if [[ "${list_confirm,,}" == "y" || "${list_confirm,,}" == "yes" ]]; then
         echo -e "${C_DIM}Displaying snapshot contents (use arrow keys to scroll, 'q' to quit)...${C_RESET}"
-        less -f <(restic ls -l "$snapshot_id")
+        less -fR <(restic ls -l "$snapshot_id")
     fi
-    read -p "Enter restore destination (absolute path): " restore_dest
+    read -rp "Enter restore destination (absolute path): " restore_dest
     if [[ -z "$restore_dest" || "$restore_dest" != /* ]]; then
         echo -e "${C_RED}Error: Must be a non-empty, absolute path. Aborting.${C_RESET}" >&2
         return 0
@@ -1315,7 +1369,7 @@ run_restore() {
         echo -e "\n${C_RED}${C_BOLD}WARNING: Restoring to critical system directory '$restore_dest'${C_RESET}"
         echo -e "${C_RED}This could damage your system or make it unbootable!${C_RESET}"
         local confirm
-        read -p "${C_YELLOW}Type 'DANGEROUS' to proceed or anything else to cancel: ${C_RESET}" confirm
+        read -rp "${C_YELLOW}Type 'DANGEROUS' to proceed or anything else to cancel: ${C_RESET}" confirm
         if [[ "$confirm" != "DANGEROUS" ]]; then
             echo -e "${C_GREEN}Restore cancelled for safety.${C_RESET}"
             return 0
@@ -1323,7 +1377,7 @@ run_restore() {
         log_message "WARNING: User confirmed dangerous restore to: $restore_dest"
     fi
     local include_paths=()
-    read -p "Optional: Enter specific file(s) to restore, separated by spaces (leave blank for full restore): " -a include_paths
+    read -rp "Optional: Enter specific file(s) to restore, separated by spaces (leave blank for full restore): " -a include_paths
     local restic_cmd=(restic restore "$snapshot_id" --target "$restore_dest" --verbose)
     if [ ${#include_paths[@]} -gt 0 ]; then
         for path in "${include_paths[@]}"; do
@@ -1338,7 +1392,7 @@ run_restore() {
     fi
     echo -e "${C_BOLD}--- Dry Run Complete ---${C_RESET}"
     local proceed_confirm
-    read -p "Proceed with the actual restore? (y/n): " proceed_confirm
+    read -rp "Proceed with the actual restore? (y/n): " proceed_confirm
     if [[ "${proceed_confirm,,}" != "y" && "${proceed_confirm,,}" != "yes" ]]; then
         echo "Restore cancelled by user."
         return 0
@@ -1434,13 +1488,13 @@ run_background_restore() {
         echo -e "${C_RED}Error: Destination must be a non-empty, absolute path. Aborting.${C_RESET}" >&2
         exit 1
     fi
-    local restore_log="/tmp/restic-restore-${snapshot_id:0:8}-$(date +%s).log"
+    local restore_log; restore_log="/tmp/restic-restore-${snapshot_id:0:8}-$(date +%s).log"
     echo "Restore job started. Details will be logged to: ${restore_log}"
     log_message "Starting background restore of snapshot ${snapshot_id} to ${restore_dest}. See ${restore_log} for details."
     (
-        local start_time=$(date +%s)
+        local start_time; start_time=$(date +%s)
         if _run_restore_command "$@"; then
-            local end_time=$(date +%s)
+            local end_time; end_time=$(date +%s)
             local duration=$((end_time - start_time))
             _handle_restore_ownership "$restore_dest"
             log_message "Background restore SUCCESS: ${snapshot_id} to ${restore_dest} in ${duration}s."
@@ -1486,7 +1540,7 @@ run_snapshots_delete() {
     fi
     echo
     local -a ids_to_delete
-    read -p "Enter snapshot ID(s) to delete, separated by spaces: " -a ids_to_delete
+    read -rp "Enter snapshot ID(s) to delete, separated by spaces: " -a ids_to_delete
     if [ ${#ids_to_delete[@]} -eq 0 ]; then
         echo "No snapshot IDs entered. Aborting."
         return 0
@@ -1496,7 +1550,7 @@ run_snapshots_delete() {
         echo "  - $id"
     done
     echo
-    read -p "Are you absolutely sure you want to PERMANENTLY delete these snapshots? (Type 'yes' to confirm): " confirm
+    read -rp "Are you absolutely sure you want to PERMANENTLY delete these snapshots? (Type 'yes' to confirm): " confirm
     if [[ "$confirm" != "yes" ]]; then
         echo "Confirmation not received. Aborting deletion."
         return 0
@@ -1511,7 +1565,7 @@ run_snapshots_delete() {
         echo -e "${C_RED}❌ Failed to delete snapshots.${C_RESET}" >&2
         return 1
     fi
-    read -p "Would you like to run 'prune' now to reclaim disk space? (y/n): " prune_confirm
+    read -rp "Would you like to run 'prune' now to reclaim disk space? (y/n): " prune_confirm
     if [[ "${prune_confirm,,}" == "y" || "${prune_confirm,,}" == "yes" ]]; then
         echo -e "${C_BOLD}--- Pruning Repository ---${C_RESET}"
         log_message "Running prune after manual forget"
@@ -1525,6 +1579,74 @@ run_snapshots_delete() {
     else
         echo -e "${C_CYAN}ℹ️  Skipping prune. Run '--forget' or 'restic prune' later to reclaim space.${C_RESET}"
     fi
+}
+
+recovery_kit() {
+    echo -e "${C_BOLD}--- Generating Disaster Recovery Kit ---${C_RESET}"
+    local recovery_pass
+    if ! recovery_pass=$(cat "$RESTIC_PASSWORD_FILE"); then
+        echo -e "${C_RED}Error: Could not read password file: $RESTIC_PASSWORD_FILE${C_RESET}" >&2
+        return 1
+    fi
+    if [ -z "$recovery_pass" ]; then
+        echo -e "${C_RED}Error: Password file is empty: $RESTIC_PASSWORD_FILE${C_RESET}" >&2
+        return 1
+    fi
+    local recovery_file backup_sources_str
+    recovery_file="${SCRIPT_DIR}/restic-recovery-kit-${HOSTNAME}-$(date +%Y%m%d).sh"
+    backup_sources_str="${BACKUP_SOURCES[*]}"
+    local tmpfile
+    tmpfile=$(mktemp) || {
+        echo -e "${C_RED}ERROR: Could not create temporary file for recovery kit.${C_RESET}" >&2
+        return 1
+    }
+    cat > "$tmpfile" << EOF
+#!/usr/bin/env bash
+# =================================================================
+#            --- Restic Emergency Recovery Kit ---
+# =================================================================
+# Generated by $0 on $(date) for host $HOSTNAME
+#
+# !! WARNING: This file contains your repository password in plain text !!
+# !! Store it securely (e.g., encrypted USB, password manager) !!
+#
+# To use:
+# 1. Install restic on a new system:
+#    (e.g.,) curl -L https://github.com/restic/restic/releases/latest/download/restic_latest_linux_amd64.bz2 | bunzip2 > restic
+#    (e.g.,) chmod +x restic && sudo mv restic /usr/local/bin/
+#
+# 2. Make this script executable: chmod +x ${recovery_file##*/}
+# 3. Run this script OR manually export the variables.
+# 4. Restore your data.
+
+# --- Embedded Configuration ---
+export RESTIC_REPOSITORY="${RESTIC_REPOSITORY}"
+export RESTIC_PASSWORD="${recovery_pass}"
+
+# --- Repository Info (for reference) ---
+echo "--- Repository Information ---"
+echo "Repository: \$RESTIC_REPOSITORY"
+echo "Backed up host: $HOSTNAME"
+echo "Original backup sources: ${backup_sources_str}"
+echo ""
+
+# --- Example Commands ---
+echo "--- Listing Snapshots (run 'restic snapshots') ---"
+restic snapshots
+echo ""
+echo "--- Example Restore Command (MODIFY AS NEEDED) ---"
+echo "To restore the latest snapshot to /mnt/restore, uncomment and run:"
+# restic restore latest --target /mnt/restore
+echo ""
+echo "To restore a specific directory from the latest snapshot:"
+# restic restore latest --target /mnt/restore --include "/home/user_files"
+
+EOF
+    chmod 400 "$tmpfile"    
+    mv -f "$tmpfile" "$recovery_file"
+    echo -e "\n${C_GREEN}✅ Recovery Kit generated: ${C_BOLD}${recovery_file}${C_RESET}"
+    echo -e "${C_BOLD}${C_RED}WARNING: This file contains your repository password.${C_RESET}"
+    echo -e "${C_YELLOW}Store this file securely and OFFLINE (e.g., encrypted USB, password manager).${C_RESET}"
 }
 
 # =================================================================
@@ -1612,6 +1734,10 @@ case "${1:-}" in
         run_preflight_checks "backup" "verbose"
         echo -e "${C_GREEN}✅ All tests passed${C_RESET}"
         ;;
+    --recovery-kit)
+        run_preflight_checks "backup" "quiet"
+        recovery_kit
+        ;;
     --snapshots)
         run_preflight_checks "backup" "quiet"
         run_snapshots
@@ -1624,6 +1750,11 @@ case "${1:-}" in
     --restore)
         run_preflight_checks "restore" "quiet"
         run_restore
+        ;;
+    --dump)
+        run_preflight_checks "restore" "quiet"
+        shift
+        run_dump "$@"
         ;;
     --background-restore)
         shift
@@ -1666,6 +1797,11 @@ case "${1:-}" in
     --snapshots-delete)
         run_preflight_checks "backup" "quiet"
         run_snapshots_delete
+        ;;
+    --find)
+        run_preflight_checks "backup" "quiet"
+        shift
+        run_find "$@"
         ;;
     --stats)
         run_preflight_checks "backup" "quiet"
