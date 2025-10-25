@@ -328,6 +328,7 @@ display_help() {
     echo -e "Config: ${C_DIM}${CONFIG_FILE}${C_RESET}  Log: ${C_DIM}${LOG_FILE}${C_RESET}"
     echo
     echo -e "For full details, see the online documentation: \e]8;;${readme_url}\a${C_CYAN}README.md${C_RESET}\e]8;;\a"
+    echo -e "${C_YELLOW}Note:${C_RESET} For restic official documentation See: https://restic.readthedocs.io/"
     echo
 }
 
@@ -518,11 +519,19 @@ run_find() {
     echo -e "${C_BOLD}--- Finding Files (searching all snapshots) ---${C_RESET}"
     log_message "Running find with patterns: $*"
     echo -e "${C_DIM}Searching... (use arrow keys to scroll, 'q' to quit)...${C_RESET}"
-    restic find "$@" | less -f
+    local find_stderr; find_stderr=$(mktemp)
+    restic find "$@" 2> >(tee "$find_stderr" >&2) | less -f
     if [ "${PIPESTATUS[0]}" -ne 0 ]; then
-        echo -e "${C_RED}Error: Find command failed. Check your pattern(s).${C_RESET}" >&2
+        echo -e "${C_RED}Error: Find command failed.${C_RESET}" >&2
+        if [ -s "$find_stderr" ]; then
+            echo -e "${C_YELLOW}--- restic error output ---${C_RESET}" >&2
+            cat "$find_stderr" >&2
+            echo -e "${C_YELLOW}--------------------------${C_RESET}" >&2
+        fi
+        rm -f "$find_stderr"
         return 1
     fi
+    rm -f "$find_stderr"
 }
 
 run_dump() {
