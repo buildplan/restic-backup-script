@@ -516,7 +516,7 @@ run_find() {
         return 1
     fi
     echo -e "${C_BOLD}--- Finding Files (searching all snapshots) ---${C_RESET}"
-    log_message "Running find with patterns: $@"
+    log_message "Running find with patterns: $*"
     echo -e "${C_DIM}Searching... (use arrow keys to scroll, 'q' to quit)...${C_RESET}"
     restic find "$@" | less -f
     if [ "${PIPESTATUS[0]}" -ne 0 ]; then
@@ -1474,13 +1474,13 @@ run_background_restore() {
         echo -e "${C_RED}Error: Destination must be a non-empty, absolute path. Aborting.${C_RESET}" >&2
         exit 1
     fi
-    local restore_log="/tmp/restic-restore-${snapshot_id:0:8}-$(date +%s).log"
+    local restore_log; restore_log="/tmp/restic-restore-${snapshot_id:0:8}-$(date +%s).log"
     echo "Restore job started. Details will be logged to: ${restore_log}"
     log_message "Starting background restore of snapshot ${snapshot_id} to ${restore_dest}. See ${restore_log} for details."
     (
-        local start_time=$(date +%s)
+        local start_time; start_time=$(date +%s)
         if _run_restore_command "$@"; then
-            local end_time=$(date +%s)
+            local end_time; end_time=$(date +%s)
             local duration=$((end_time - start_time))
             _handle_restore_ownership "$restore_dest"
             log_message "Background restore SUCCESS: ${snapshot_id} to ${restore_dest} in ${duration}s."
@@ -1526,7 +1526,7 @@ run_snapshots_delete() {
     fi
     echo
     local -a ids_to_delete
-    read -p "Enter snapshot ID(s) to delete, separated by spaces: " -a ids_to_delete
+    read -rp "Enter snapshot ID(s) to delete, separated by spaces: " -a ids_to_delete
     if [ ${#ids_to_delete[@]} -eq 0 ]; then
         echo "No snapshot IDs entered. Aborting."
         return 0
@@ -1536,7 +1536,7 @@ run_snapshots_delete() {
         echo "  - $id"
     done
     echo
-    read -p "Are you absolutely sure you want to PERMANENTLY delete these snapshots? (Type 'yes' to confirm): " confirm
+    read -rp "Are you absolutely sure you want to PERMANENTLY delete these snapshots? (Type 'yes' to confirm): " confirm
     if [[ "$confirm" != "yes" ]]; then
         echo "Confirmation not received. Aborting deletion."
         return 0
@@ -1551,7 +1551,7 @@ run_snapshots_delete() {
         echo -e "${C_RED}❌ Failed to delete snapshots.${C_RESET}" >&2
         return 1
     fi
-    read -p "Would you like to run 'prune' now to reclaim disk space? (y/n): " prune_confirm
+    read -rp "Would you like to run 'prune' now to reclaim disk space? (y/n): " prune_confirm
     if [[ "${prune_confirm,,}" == "y" || "${prune_confirm,,}" == "yes" ]]; then
         echo -e "${C_BOLD}--- Pruning Repository ---${C_RESET}"
         log_message "Running prune after manual forget"
