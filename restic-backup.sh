@@ -580,9 +580,11 @@ send_ntfy() {
     if [[ "${NTFY_ENABLED:-false}" != "true" ]] || [ -z "${NTFY_TOKEN:-}" ] || [ -z "${NTFY_URL:-}" ]; then
         return 0
     fi
+    local safe_title
+    safe_title=$(echo "$title" | jq -R -r 'sub("\n"; " "; "g")')
     curl -s --max-time 15 \
         -u ":$NTFY_TOKEN" \
-        -H "Title: $title" \
+        -H "Title: $safe_title" \
         -H "Tags: $tags" \
         -H "Priority: $priority" \
         -d "$message" \
@@ -603,12 +605,13 @@ send_discord() {
         failure) color=15158332 ;;
         *) color=9807270 ;;
     esac
-    local escaped_title escaped_message
-    escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
-    escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
     local json_payload
-    printf -v json_payload '{"embeds": [{"title": "%s", "description": "%s", "color": %d, "timestamp": "%s"}]}' \
-        "$escaped_title" "$escaped_message" "$color" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+    json_payload=$(jq -n \
+                  --arg title "$title" \
+                  --arg desc "$message" \
+                  --argjson color "$color" \
+                  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+                  '{embeds: [{title: $title, description: $desc, color: $color, timestamp: $ts}]}')
     curl -s --max-time 15 \
         -H "Content-Type: application/json" \
         -d "$json_payload" \
@@ -619,6 +622,7 @@ send_teams() {
     local title="$1"
     local status="$2"
     local message="$3"
+
     if [[ "${TEAMS_ENABLED:-false}" != "true" ]] || [ -z "${TEAMS_WEBHOOK_URL:-}" ]; then
         return 0
     fi
@@ -629,40 +633,39 @@ send_teams() {
         failure) color="attention" ;;
         *) color="default" ;;
     esac
-    local escaped_title
-    escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
-    local escaped_message
-    escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
     local json_payload
-    # shellcheck disable=SC2016
-    printf -v json_payload '{
-      "type": "message",
-      "attachments": [{
-        "contentType": "application/vnd.microsoft.card.adaptive",
-        "content": {
-          "type": "AdaptiveCard",
-          "version": "1.4",
-          "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-          "body": [
-            {
-              "type": "TextBlock",
-              "text": "%s",
-              "weight": "bolder",
-              "size": "large",
-              "wrap": true,
-              "color": "%s"
-            },
-            {
-              "type": "TextBlock",
-              "text": "%s",
-              "wrap": true,
-              "separator": true
-            }
-          ],
-          "msteams": { "width": "full", "entities": [] }
-        }
-      }]
-    }' "$escaped_title" "$color" "$escaped_message"
+    json_payload=$(jq -n \
+                  --arg title "$title" \
+                  --arg msg "$message" \
+                  --arg color "$color" \
+                  '{
+                    type: "message",
+                    attachments: [{
+                      contentType: "application/vnd.microsoft.card.adaptive",
+                      content: {
+                        type: "AdaptiveCard",
+                        version: "1.4",
+                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                        body: [
+                          {
+                            type: "TextBlock",
+                            text: $title,
+                            weight: "bolder",
+                            size: "large",
+                            wrap: true,
+                            color: $color
+                          },
+                          {
+                            type: "TextBlock",
+                            text: $msg,
+                            wrap: true,
+                            separator: true
+                          }
+                        ],
+                        msteams: { width: "full", entities: [] }
+                      }
+                    }]
+                  }')
     curl -s --max-time 15 \
         -H "Content-Type: application/json" \
         -d "$json_payload" \
@@ -683,33 +686,35 @@ send_slack() {
         failure) color="#d50200" ;;
         *) color="#808080" ;;
     esac
-    local escaped_title escaped_message
-    escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
-    escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
     local json_payload
-    printf -v json_payload '{
-        "attachments": [
-            {
-                "color": "%s",
-                "blocks": [
-                    {
-                        "type": "header",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "%s"
+    json_payload=$(jq -n \
+                  --arg title "$title" \
+                  --arg msg "$message" \
+                  --arg color "$color" \
+                  '{
+                    attachments: [
+                        {
+                            color: $color,
+                            blocks: [
+                                {
+                                    type: "header",
+                                    text: {
+                                        type: "plain_text",
+                                        text: $title,
+                                        emoji: true
+                                    }
+                                },
+                                {
+                                    type: "section",
+                                    text: {
+                                        type: "mrkdwn",
+                                        text: $msg
+                                    }
+                                }
+                            ]
                         }
-                    },
-                    {
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": "%s"
-                        }
-                    }
-                ]
-            }
-        ]
-    }' "$color" "$escaped_title" "$escaped_message"
+                    ]
+                  }')
     curl -s --max-time 15 \
         -H "Content-Type: application/json" \
         -d "$json_payload" \
@@ -1270,7 +1275,7 @@ run_backup() {
         files_changed=$(grep "Files:" "$backup_log" | tail -1 | awk '{print $4}')
         files_unmodified=$(grep "Files:" "$backup_log" | tail -1 | awk '{print $6}')
         data_added=$(grep "Added to the repository:" "$backup_log" | tail -1 | awk '{print $5" "$6}')
-        data_processed=$(grep "processed" "$backup_log" | tail -1 | awk '{print $1" "$2}')
+        data_processed=$(grep "processed" "$backup_log" | tail -1 | awk '{print $2" "$3}' | tr -d ',')
     fi
     cat "$backup_log" >> "$LOG_FILE"
     rm -f "$backup_log"
