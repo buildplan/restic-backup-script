@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#           Restic Backup Script v0.39 - 2025.10.25
+#           Restic Backup Script v0.40 - 2025.11.18
 # =================================================================
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -9,7 +9,7 @@ set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.39"
+SCRIPT_VERSION="0.40"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 PROG_NAME=$(basename "$0"); readonly PROG_NAME
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
@@ -876,8 +876,9 @@ run_preflight_checks() {
         fi
         for source in "${BACKUP_SOURCES[@]}"; do
             if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Source directory ('$source')..."; fi
-            if [ ! -d "$source" ] || [ ! -r "$source" ]; then
-                handle_failure "Source directory not found or not readable: $source" "13"
+            # Changed -d (directory) to -e (exists) to allow single file backups (v0.40)
+            if [ ! -e "$source" ] || [ ! -r "$source" ]; then
+                handle_failure "Source path not found or not readable: $source" "13"
             fi
             if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
         done
