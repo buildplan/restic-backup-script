@@ -47,31 +47,46 @@ fi
 # =================================================================
 
 import_restic_key() {
-    local fpr="CF8F18F2844575973F79D4E191A6868BD3F7A907"
-    # Check local user keyring
+    local fpr servers debian_keyring
+
+    # Official Fingerprint
+    fpr="CF8F18F2844575973F79D4E191A6868BD3F7A907"
+
+    # 1. Check local user keyring first
     if gpg --list-keys "$fpr" >/dev/null 2>&1; then
         return 0
     fi
-    # Check Debian/Ubuntu system keyring
-    local debian_keyring="/usr/share/keyrings/restic-archive-keyring.gpg"
-    if [[ -f "$debian_keyring" ]]; then
-        echo "Found debian keyring, checking for key..."
-        if gpg --no-default-keyring --keyring "$debian_keyring" --list-keys "$fpr" >/dev/null 2>&1; then
-            echo "Importing trusted key from system keyring..."
-            gpg --no-default-keyring --keyring "$debian_keyring" --export "$fpr" | gpg --import >/dev/null 2>&1
-            return $?
-        fi
+
+    echo "Restic PGP key not found. Attempting import..."
+
+    # 2. Attempt Direct Download from Restic.net
+    echo "Attempting direct download from restic.net..."
+    if curl -sL "https://restic.net/gpg-key-alex.asc" | gpg --import >/dev/null 2>&1; then
+         echo "Key imported successfully via direct download."
+         return 0
     fi
-    # Try public keyservers fallback
-    local servers=( "hkps://keys.openpgp.org" "hkps://keyserver.ubuntu.com" )
+
+    # 3. Try Keyservers
+    servers=( "hkps://keyserver.ubuntu.com" "hkps://keys.openpgp.org" "hkps://pgp.mit.edu" )
     for server in "${servers[@]}"; do
         echo "Attempting to fetch from $server..."
-        if gpg --keyserver "$server" --recv-keys "$fpr"; then
-            echo "Key imported successfully."
+        if gpg --keyserver "$server" --recv-keys "$fpr" >/dev/null 2>&1; then
+            echo "Key imported successfully from $server."
             return 0
         fi
     done
-    echo "Failed to import restic PGP key." >&2
+
+    # 4. Check Debian/Ubuntu system keyring (Fallback for apt-installed systems)
+    debian_keyring="/usr/share/keyrings/restic-archive-keyring.gpg"
+    if [[ -f "$debian_keyring" ]]; then
+        echo "Checking system keyring..."
+        if gpg --no-default-keyring --keyring "$debian_keyring" --export "$fpr" | gpg --import >/dev/null 2>&1; then
+            echo "Imported from system keyring."
+            return 0
+        fi
+    fi
+
+    echo -e "${C_RED}Failed to import restic PGP key from all sources.${C_RESET}" >&2
     return 1
 }
 
@@ -258,7 +273,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
     echo -e "${C_RED}ERROR: Configuration file not found: $CONFIG_FILE${C_RESET}" >&2
     exit 1
 fi
-# shellcheck source=restic-backup.conf
+# shellcheck source=/dev/null
 source "$CONFIG_FILE"
 REQUIRED_VARS=(
     "RESTIC_REPOSITORY"
@@ -326,7 +341,7 @@ display_help() {
     echo -e "${C_BOLD}${C_YELLOW}DEPENDENCIES:${C_RESET}"
     echo -e "  This script requires: ${C_GREEN}restic, curl, gpg, bzip2, less, jq, flock${C_RESET}"
     echo
-    echo -e "Config: ${C_DIM}${CONFIG_FILE}${C_RESET}  Log: ${C_DIM}${LOG_FILE}${C_RESET}"
+    echo -e "Config: ${C_DIM}${CONFIG_FILE}${C_RESET}  Log: ${C_DIM}${LOG_FILE:-"(not set)"}${C_RESET}"
     echo
     echo -e "For full details, see the online documentation: \e]8;;${readme_url}\a${C_CYAN}README.md${C_RESET}\e]8;;\a"
     echo -e "${C_YELLOW}Note:${C_RESET} For restic official documentation See: https://restic.readthedocs.io/"
@@ -354,7 +369,9 @@ handle_crash() {
 
 build_backup_command() {
     local cmd=(restic)
-    cmd+=($(get_verbosity_flags))
+    local -a v_flags
+    read -ra v_flags <<< "$(get_verbosity_flags)"
+    cmd+=("${v_flags[@]}")
     if [ -n "${SFTP_CONNECTIONS:-}" ]; then
         cmd+=(-o "sftp.connections=${SFTP_CONNECTIONS}")
     fi
@@ -462,7 +479,7 @@ run_unlock() {
     echo -e "${C_YELLOW}Found stale locks in the repository:${C_RESET}"
     echo "$lock_info"
     local other_processes
-    other_processes=$(ps aux | grep 'restic ' | grep -v 'grep' || true)
+    other_processes=$(pgrep -ax restic || true)
     if [ -n "$other_processes" ]; then
         echo -e "${C_YELLOW}WARNING: Another restic process appears to be running:${C_RESET}"
         echo "$other_processes"
@@ -617,6 +634,7 @@ send_teams() {
     local escaped_message
     escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
     local json_payload
+    # shellcheck disable=SC2016
     printf -v json_payload '{
       "type": "message",
       "attachments": [{
@@ -1262,10 +1280,11 @@ run_backup() {
         log_message "Backup completed successfully"
         echo -e "${C_GREEN}✅ Backup completed${C_RESET}"
         local stats_msg
-        printf -v stats_msg "Files: %s new, %s changed, %s unmodified\nData added: %s\nDuration: %dm %ds" \
+        printf -v stats_msg "Files: %s new, %s changed, %s unmodified\nProcessed: %s\nData added: %s\nDuration: %dm %ds" \
             "${files_new:-0}" \
             "${files_changed:-0}" \
             "${files_unmodified:-0}" \
+            "${data_processed:-0}" \
             "${data_added:-Not applicable}" \
             "$((duration / 60))" \
             "$((duration % 60))"
@@ -1284,7 +1303,9 @@ run_forget() {
     echo -e "${C_BOLD}--- Cleaning Old Snapshots ---${C_RESET}"
     log_message "Running retention policy"
     local forget_cmd=(restic)
-    forget_cmd+=($(get_verbosity_flags))
+    local -a v_flags
+    read -ra v_flags <<< "$(get_verbosity_flags)"
+    forget_cmd+=("${v_flags[@]}")
     forget_cmd+=(forget)
     [ -n "${KEEP_LAST:-}" ] && forget_cmd+=(--keep-last "$KEEP_LAST")
     [ -n "${KEEP_DAILY:-}" ] && forget_cmd+=(--keep-daily "$KEEP_DAILY")
@@ -1460,7 +1481,9 @@ _run_restore_command() {
     shift 2
     mkdir -p "$restore_dest"
     local restic_cmd=(restic)
-    restic_cmd+=($(get_verbosity_flags))
+    local -a v_flags
+    read -ra v_flags <<< "$(get_verbosity_flags)"
+    restic_cmd+=("${v_flags[@]}")
     restic_cmd+=(restore "$snapshot_id" --target "$restore_dest")
     if [ $# -gt 0 ]; then
         for path in "$@"; do
@@ -1643,7 +1666,7 @@ echo "To restore a specific directory from the latest snapshot:"
 # restic restore latest --target /mnt/restore --include "/home/user_files"
 
 EOF
-    chmod 400 "$tmpfile"    
+    chmod 400 "$tmpfile"
     mv -f "$tmpfile" "$recovery_file"
     echo -e "\n${C_GREEN}✅ Recovery Kit generated: ${C_BOLD}${recovery_file}${C_RESET}"
     echo -e "${C_BOLD}${C_RED}WARNING: This file contains your repository password.${C_RESET}"
