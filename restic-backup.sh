@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#           Restic Backup Script v0.39 - 2025.10.25
+#           Restic Backup Script v0.40 - 2025.11.18
 # =================================================================
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -9,7 +9,7 @@ set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.39"
+SCRIPT_VERSION="0.40"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 PROG_NAME=$(basename "$0"); readonly PROG_NAME
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
@@ -47,31 +47,46 @@ fi
 # =================================================================
 
 import_restic_key() {
-    local fpr="CF8F18F2844575973F79D4E191A6868BD3F7A907"
-    # Check local user keyring
+    local fpr servers debian_keyring
+
+    # Official Fingerprint
+    fpr="CF8F18F2844575973F79D4E191A6868BD3F7A907"
+
+    # 1. Check local user keyring first
     if gpg --list-keys "$fpr" >/dev/null 2>&1; then
         return 0
     fi
-    # Check Debian/Ubuntu system keyring
-    local debian_keyring="/usr/share/keyrings/restic-archive-keyring.gpg"
-    if [[ -f "$debian_keyring" ]]; then
-        echo "Found debian keyring, checking for key..."
-        if gpg --no-default-keyring --keyring "$debian_keyring" --list-keys "$fpr" >/dev/null 2>&1; then
-            echo "Importing trusted key from system keyring..."
-            gpg --no-default-keyring --keyring "$debian_keyring" --export "$fpr" | gpg --import >/dev/null 2>&1
-            return $?
-        fi
+
+    echo "Restic PGP key not found. Attempting import..."
+
+    # 2. Attempt Direct Download from Restic.net
+    echo "Attempting direct download from restic.net..."
+    if curl -sL "https://restic.net/gpg-key-alex.asc" | gpg --import >/dev/null 2>&1; then
+         echo "Key imported successfully via direct download."
+         return 0
     fi
-    # Try public keyservers fallback
-    local servers=( "hkps://keys.openpgp.org" "hkps://keyserver.ubuntu.com" )
+
+    # 3. Try Keyservers
+    servers=( "hkps://keyserver.ubuntu.com" "hkps://keys.openpgp.org" "hkps://pgp.mit.edu" )
     for server in "${servers[@]}"; do
         echo "Attempting to fetch from $server..."
-        if gpg --keyserver "$server" --recv-keys "$fpr"; then
-            echo "Key imported successfully."
+        if gpg --keyserver "$server" --recv-keys "$fpr" >/dev/null 2>&1; then
+            echo "Key imported successfully from $server."
             return 0
         fi
     done
-    echo "Failed to import restic PGP key." >&2
+
+    # 4. Check Debian/Ubuntu system keyring (Fallback for apt-installed systems)
+    debian_keyring="/usr/share/keyrings/restic-archive-keyring.gpg"
+    if [[ -f "$debian_keyring" ]]; then
+        echo "Checking system keyring..."
+        if gpg --no-default-keyring --keyring "$debian_keyring" --export "$fpr" | gpg --import >/dev/null 2>&1; then
+            echo "Imported from system keyring."
+            return 0
+        fi
+    fi
+
+    echo -e "${C_RED}Failed to import restic PGP key from all sources.${C_RESET}" >&2
     return 1
 }
 
@@ -258,7 +273,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
     echo -e "${C_RED}ERROR: Configuration file not found: $CONFIG_FILE${C_RESET}" >&2
     exit 1
 fi
-# shellcheck source=restic-backup.conf
+# shellcheck source=/dev/null
 source "$CONFIG_FILE"
 REQUIRED_VARS=(
     "RESTIC_REPOSITORY"
@@ -326,7 +341,7 @@ display_help() {
     echo -e "${C_BOLD}${C_YELLOW}DEPENDENCIES:${C_RESET}"
     echo -e "  This script requires: ${C_GREEN}restic, curl, gpg, bzip2, less, jq, flock${C_RESET}"
     echo
-    echo -e "Config: ${C_DIM}${CONFIG_FILE}${C_RESET}  Log: ${C_DIM}${LOG_FILE}${C_RESET}"
+    echo -e "Config: ${C_DIM}${CONFIG_FILE}${C_RESET}  Log: ${C_DIM}${LOG_FILE:-"(not set)"}${C_RESET}"
     echo
     echo -e "For full details, see the online documentation: \e]8;;${readme_url}\a${C_CYAN}README.md${C_RESET}\e]8;;\a"
     echo -e "${C_YELLOW}Note:${C_RESET} For restic official documentation See: https://restic.readthedocs.io/"
@@ -354,7 +369,9 @@ handle_crash() {
 
 build_backup_command() {
     local cmd=(restic)
-    cmd+=($(get_verbosity_flags))
+    local -a v_flags
+    read -ra v_flags <<< "$(get_verbosity_flags)"
+    cmd+=("${v_flags[@]}")
     if [ -n "${SFTP_CONNECTIONS:-}" ]; then
         cmd+=(-o "sftp.connections=${SFTP_CONNECTIONS}")
     fi
@@ -462,7 +479,7 @@ run_unlock() {
     echo -e "${C_YELLOW}Found stale locks in the repository:${C_RESET}"
     echo "$lock_info"
     local other_processes
-    other_processes=$(ps aux | grep 'restic ' | grep -v 'grep' || true)
+    other_processes=$(pgrep -ax restic || true)
     if [ -n "$other_processes" ]; then
         echo -e "${C_YELLOW}WARNING: Another restic process appears to be running:${C_RESET}"
         echo "$other_processes"
@@ -563,9 +580,11 @@ send_ntfy() {
     if [[ "${NTFY_ENABLED:-false}" != "true" ]] || [ -z "${NTFY_TOKEN:-}" ] || [ -z "${NTFY_URL:-}" ]; then
         return 0
     fi
+    local safe_title
+    safe_title=$(echo "$title" | jq -R -r 'sub("\n"; " "; "g")')
     curl -s --max-time 15 \
         -u ":$NTFY_TOKEN" \
-        -H "Title: $title" \
+        -H "Title: $safe_title" \
         -H "Tags: $tags" \
         -H "Priority: $priority" \
         -d "$message" \
@@ -586,12 +605,13 @@ send_discord() {
         failure) color=15158332 ;;
         *) color=9807270 ;;
     esac
-    local escaped_title escaped_message
-    escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
-    escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
     local json_payload
-    printf -v json_payload '{"embeds": [{"title": "%s", "description": "%s", "color": %d, "timestamp": "%s"}]}' \
-        "$escaped_title" "$escaped_message" "$color" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+    json_payload=$(jq -n \
+                  --arg title "$title" \
+                  --arg desc "$message" \
+                  --argjson color "$color" \
+                  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+                  '{embeds: [{title: $title, description: $desc, color: $color, timestamp: $ts}]}')
     curl -s --max-time 15 \
         -H "Content-Type: application/json" \
         -d "$json_payload" \
@@ -602,6 +622,7 @@ send_teams() {
     local title="$1"
     local status="$2"
     local message="$3"
+
     if [[ "${TEAMS_ENABLED:-false}" != "true" ]] || [ -z "${TEAMS_WEBHOOK_URL:-}" ]; then
         return 0
     fi
@@ -612,39 +633,39 @@ send_teams() {
         failure) color="attention" ;;
         *) color="default" ;;
     esac
-    local escaped_title
-    escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
-    local escaped_message
-    escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
     local json_payload
-    printf -v json_payload '{
-      "type": "message",
-      "attachments": [{
-        "contentType": "application/vnd.microsoft.card.adaptive",
-        "content": {
-          "type": "AdaptiveCard",
-          "version": "1.4",
-          "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-          "body": [
-            {
-              "type": "TextBlock",
-              "text": "%s",
-              "weight": "bolder",
-              "size": "large",
-              "wrap": true,
-              "color": "%s"
-            },
-            {
-              "type": "TextBlock",
-              "text": "%s",
-              "wrap": true,
-              "separator": true
-            }
-          ],
-          "msteams": { "width": "full", "entities": [] }
-        }
-      }]
-    }' "$escaped_title" "$color" "$escaped_message"
+    json_payload=$(jq -n \
+                  --arg title "$title" \
+                  --arg msg "$message" \
+                  --arg color "$color" \
+                  '{
+                    type: "message",
+                    attachments: [{
+                      contentType: "application/vnd.microsoft.card.adaptive",
+                      content: {
+                        type: "AdaptiveCard",
+                        version: "1.4",
+                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                        body: [
+                          {
+                            type: "TextBlock",
+                            text: $title,
+                            weight: "bolder",
+                            size: "large",
+                            wrap: true,
+                            color: $color
+                          },
+                          {
+                            type: "TextBlock",
+                            text: $msg,
+                            wrap: true,
+                            separator: true
+                          }
+                        ],
+                        msteams: { width: "full", entities: [] }
+                      }
+                    }]
+                  }')
     curl -s --max-time 15 \
         -H "Content-Type: application/json" \
         -d "$json_payload" \
@@ -665,33 +686,35 @@ send_slack() {
         failure) color="#d50200" ;;
         *) color="#808080" ;;
     esac
-    local escaped_title escaped_message
-    escaped_title=$(echo "$title" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
-    escaped_message=$(echo "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
     local json_payload
-    printf -v json_payload '{
-        "attachments": [
-            {
-                "color": "%s",
-                "blocks": [
-                    {
-                        "type": "header",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "%s"
+    json_payload=$(jq -n \
+                  --arg title "$title" \
+                  --arg msg "$message" \
+                  --arg color "$color" \
+                  '{
+                    attachments: [
+                        {
+                            color: $color,
+                            blocks: [
+                                {
+                                    type: "header",
+                                    text: {
+                                        type: "plain_text",
+                                        text: $title,
+                                        emoji: true
+                                    }
+                                },
+                                {
+                                    type: "section",
+                                    text: {
+                                        type: "mrkdwn",
+                                        text: $msg
+                                    }
+                                }
+                            ]
                         }
-                    },
-                    {
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": "%s"
-                        }
-                    }
-                ]
-            }
-        ]
-    }' "$color" "$escaped_title" "$escaped_message"
+                    ]
+                  }')
     curl -s --max-time 15 \
         -H "Content-Type: application/json" \
         -d "$json_payload" \
@@ -876,8 +899,9 @@ run_preflight_checks() {
         fi
         for source in "${BACKUP_SOURCES[@]}"; do
             if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Source directory ('$source')..."; fi
-            if [ ! -d "$source" ] || [ ! -r "$source" ]; then
-                handle_failure "Source directory not found or not readable: $source" "13"
+            # Changed -d (directory) to -e (exists) to allow single file backups (v0.40)
+            if [ ! -e "$source" ] || [ ! -r "$source" ]; then
+                handle_failure "Source path not found or not readable: $source" "13"
             fi
             if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
         done
@@ -1251,7 +1275,7 @@ run_backup() {
         files_changed=$(grep "Files:" "$backup_log" | tail -1 | awk '{print $4}')
         files_unmodified=$(grep "Files:" "$backup_log" | tail -1 | awk '{print $6}')
         data_added=$(grep "Added to the repository:" "$backup_log" | tail -1 | awk '{print $5" "$6}')
-        data_processed=$(grep "processed" "$backup_log" | tail -1 | awk '{print $1" "$2}')
+        data_processed=$(grep "processed" "$backup_log" | tail -1 | awk '{print $2" "$3}' | tr -d ',')
     fi
     cat "$backup_log" >> "$LOG_FILE"
     rm -f "$backup_log"
@@ -1261,10 +1285,11 @@ run_backup() {
         log_message "Backup completed successfully"
         echo -e "${C_GREEN}✅ Backup completed${C_RESET}"
         local stats_msg
-        printf -v stats_msg "Files: %s new, %s changed, %s unmodified\nData added: %s\nDuration: %dm %ds" \
+        printf -v stats_msg "Files: %s new, %s changed, %s unmodified\nProcessed: %s\nData added: %s\nDuration: %dm %ds" \
             "${files_new:-0}" \
             "${files_changed:-0}" \
             "${files_unmodified:-0}" \
+            "${data_processed:-0}" \
             "${data_added:-Not applicable}" \
             "$((duration / 60))" \
             "$((duration % 60))"
@@ -1283,7 +1308,9 @@ run_forget() {
     echo -e "${C_BOLD}--- Cleaning Old Snapshots ---${C_RESET}"
     log_message "Running retention policy"
     local forget_cmd=(restic)
-    forget_cmd+=($(get_verbosity_flags))
+    local -a v_flags
+    read -ra v_flags <<< "$(get_verbosity_flags)"
+    forget_cmd+=("${v_flags[@]}")
     forget_cmd+=(forget)
     [ -n "${KEEP_LAST:-}" ] && forget_cmd+=(--keep-last "$KEEP_LAST")
     [ -n "${KEEP_DAILY:-}" ] && forget_cmd+=(--keep-daily "$KEEP_DAILY")
@@ -1459,7 +1486,9 @@ _run_restore_command() {
     shift 2
     mkdir -p "$restore_dest"
     local restic_cmd=(restic)
-    restic_cmd+=($(get_verbosity_flags))
+    local -a v_flags
+    read -ra v_flags <<< "$(get_verbosity_flags)"
+    restic_cmd+=("${v_flags[@]}")
     restic_cmd+=(restore "$snapshot_id" --target "$restore_dest")
     if [ $# -gt 0 ]; then
         for path in "$@"; do
@@ -1642,7 +1671,7 @@ echo "To restore a specific directory from the latest snapshot:"
 # restic restore latest --target /mnt/restore --include "/home/user_files"
 
 EOF
-    chmod 400 "$tmpfile"    
+    chmod 400 "$tmpfile"
     mv -f "$tmpfile" "$recovery_file"
     echo -e "\n${C_GREEN}✅ Recovery Kit generated: ${C_BOLD}${recovery_file}${C_RESET}"
     echo -e "${C_BOLD}${C_RED}WARNING: This file contains your repository password.${C_RESET}"
