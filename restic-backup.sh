@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#           Restic Backup Script v0.40 - 2025.11.18
+#           Restic Backup Script v0.41 - 2025.11.24
 # =================================================================
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -9,7 +9,7 @@ set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.40"
+SCRIPT_VERSION="0.41"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 PROG_NAME=$(basename "$0"); readonly PROG_NAME
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
@@ -76,7 +76,7 @@ import_restic_key() {
         fi
     done
 
-    # 4. Check Debian/Ubuntu system keyring (Fallback for apt-installed systems)
+    # 4. Check System Keyring (Distro specific)
     debian_keyring="/usr/share/keyrings/restic-archive-keyring.gpg"
     if [[ -f "$debian_keyring" ]]; then
         echo "Checking system keyring..."
@@ -111,9 +111,9 @@ check_and_install_restic() {
     echo -e "${C_BOLD}--- Checking Restic Version ---${C_RESET}"
     if ! command -v less &>/dev/null || ! command -v bzip2 &>/dev/null || ! command -v curl &>/dev/null || ! command -v gpg &>/dev/null || ! command -v jq &>/dev/null; then
         echo
-        echo -e "${C_RED}ERROR: 'less', 'bzip2', 'curl', 'gpg', and 'jq' are required for secure auto-installation.${C_RESET}" >&2
+        echo -e "${C_RED}ERROR: Missing dependencies.${C_RESET}" >&2
         echo
-        echo -e "${C_YELLOW}On Debian based systems install with: sudo apt-get install less bzip2 curl gnupg jq${C_RESET}" >&2
+        echo -e "${C_YELLOW}Install with: ${MISSING_PKG_HINT}${C_RESET}" >&2
         echo
         exit 1
     fi
@@ -194,7 +194,11 @@ check_and_install_restic() {
     echo "Decompressing and installing to /usr/local/bin/restic..."
     if bunzip2 -c "$temp_binary" > /usr/local/bin/restic.tmp; then
         chmod +x /usr/local/bin/restic.tmp
-        mv /usr/local/bin/restic.tmp /usr/local/bin/restic
+        mv /usr/local/bin/restic.tmp /usr/local/bin/restic        
+        if [[ "$IS_SELINUX_DISTRO" == "true" ]] && command -v restorecon &>/dev/null; then
+            echo "Applying SELinux context to binary..."
+            restorecon -v /usr/local/bin/restic || true
+        fi
         echo -e "${C_GREEN}✅ Restic version $latest_version installed successfully.${C_RESET}"
     else
         echo -e "${C_RED}Installation failed.${C_RESET}" >&2
@@ -346,6 +350,33 @@ display_help() {
     echo -e "For full details, see the online documentation: \e]8;;${readme_url}\a${C_CYAN}README.md${C_RESET}\e]8;;\a"
     echo -e "${C_YELLOW}Note:${C_RESET} For restic official documentation See: https://restic.readthedocs.io/"
     echo
+}
+
+detect_distro() {
+    if [ -f /etc/os-release ]; then
+        # shellcheck source=/dev/null
+        . /etc/os-release
+        OS_NAME=$ID
+    else
+        OS_NAME=$(uname -s)
+    fi
+    case "$OS_NAME" in
+        fedora|rhel|centos|almalinux|rocky)
+            # Fedora/RedHat settings
+            MISSING_PKG_HINT="sudo dnf install restic curl gnupg bzip2 less jq util-linux"
+            IS_SELINUX_DISTRO=true
+            ;;
+        debian|ubuntu|pop|mint|kali)
+            # Debian/Ubuntu settings
+            MISSING_PKG_HINT="sudo apt-get install restic curl gnupg bzip2 less jq"
+            IS_SELINUX_DISTRO=false
+            ;;
+        *)
+            # Fallback for Arch, Suse, Alpine, macOS, etc.
+            MISSING_PKG_HINT="Please install manually: restic curl gnupg bzip2 less jq"
+            IS_SELINUX_DISTRO=false
+            ;;
+    esac
 }
 
 log_message() {
@@ -791,13 +822,7 @@ run_preflight_checks() {
     local required_cmds=(restic curl flock jq less gpg bzip2)
     for cmd in "${required_cmds[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then
-            local install_hint="On Debian-based systems, try: sudo apt install $cmd"
-            case "$cmd" in
-                gpg) install_hint="On Debian-based systems, try: sudo apt install gnupg";;
-                bzip2) install_hint="On Debian-based systems, try: sudo apt install bzip2";;
-                less) install_hint="On Debian-based systems, try: sudo apt install less";;
-            esac
-            handle_failure "Required command '$cmd' not found. $install_hint" "10"
+            handle_failure "Required command '$cmd' not found. Try: $MISSING_PKG_HINT" "10"
         fi
     done
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
@@ -1722,6 +1747,7 @@ fi
 LOCK_FD=200
 
 # 4. After lock, it's safe to run updates.
+detect_distro
 check_for_script_update
 check_and_install_restic
 
