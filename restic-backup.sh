@@ -361,19 +361,34 @@ detect_distro() {
         OS_NAME=$(uname -s)
     fi
     case "$OS_NAME" in
-        fedora|rhel|centos|almalinux|rocky)
-            # Fedora/RedHat settings
+        fedora|rhel|centos|almalinux|rocky|amzn)
+            # RHEL / Fedora based
             MISSING_PKG_HINT="sudo dnf install restic curl gnupg bzip2 less jq util-linux"
             IS_SELINUX_DISTRO=true
             ;;
-        debian|ubuntu|pop|mint|kali)
-            # Debian/Ubuntu settings
+        debian|ubuntu|pop|mint|kali|raspbian|elementary)
+            # Debian / Ubuntu based
             MISSING_PKG_HINT="sudo apt-get install restic curl gnupg bzip2 less jq"
             IS_SELINUX_DISTRO=false
             ;;
+        arch|manjaro|endeavouros|garuda)
+            # Arch based ( # i don't use arch btw :)
+            MISSING_PKG_HINT="sudo pacman -S restic curl gnupg bzip2 less jq"
+            IS_SELINUX_DISTRO=false
+            ;;
+        opensuse*|sles)
+            # OpenSUSE
+            MISSING_PKG_HINT="sudo zypper install restic curl gpg2 bzip2 less jq"
+            IS_SELINUX_DISTRO=false
+            ;;
+        alpine)
+            # Alpine
+            MISSING_PKG_HINT="sudo apk add restic curl gnupg bzip2 less jq util-linux # (Ensure community repo is enabled)"
+            IS_SELINUX_DISTRO=false
+            ;;
         *)
-            # Fallback for Arch, Suse, Alpine, macOS, etc.
-            MISSING_PKG_HINT="Please install manually: restic curl gnupg bzip2 less jq"
+            # Fallback for unknown systems
+            MISSING_PKG_HINT="Please install manually: restic curl gnupg bzip2 less jq util-linux"
             IS_SELINUX_DISTRO=false
             ;;
     esac
