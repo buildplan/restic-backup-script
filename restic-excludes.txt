@@ -1,10 +1,21 @@
 # Common cache, logs and temporary files
-.cache/
 /tmp/
+/var/cache/
+/var/tmp/
+.cache/
 *.tmp
 *.bak
 *.swp
 *.log
+*.pyc
+*.pyo
+*.class
+*~
+/var/lib/systemd/coredump
+/var/spool/cups
+/var/spool/mail
+/var/spool/postfix
+.git/objects/
 
 # Specific application caches/dependencies
 /node_modules/
@@ -12,7 +23,7 @@
 __pycache__/
 
 # System files that shouldn't be backed up
-/lost+found/
+lost+found/
 .DS_Store
 Thumbs.db
 
@@ -38,8 +49,6 @@ Thumbs.db
 
 # Log directories
 /var/log/
-/var/cache/
-/var/tmp/
 
 # Database files (backup separately)
 *.db-shm
