@@ -85,7 +85,14 @@ display_help() {
     echo -e "${C_BOLD}${C_YELLOW}DEPENDENCIES:${C_RESET}"
     echo -e "  This script requires: ${C_GREEN}restic, curl, gpg, bzip2, less, jq, flock${C_RESET}"
     echo
-    echo -e "Config: ${C_DIM}${CONFIG_FILE}${C_RESET}  Log: ${C_DIM}${LOG_FILE:-"(not set)"}${C_RESET}"
+    local display_log
+    if [ -r "$CONFIG_FILE" ]; then
+        # shellcheck source=/dev/null disable=SC2153
+        display_log=$(source "$CONFIG_FILE" >/dev/null 2>&1; echo "$LOG_FILE")
+    else
+        display_log="(requires sudo to read config)"
+    fi
+    echo -e "Config: ${C_DIM}${CONFIG_FILE}${C_RESET}  Log: ${C_DIM}${display_log:-"(not set)"}${C_RESET}"
     echo
     echo -e "For full details, see the online documentation: \e]8;;${readme_url}\a${C_CYAN}README.md${C_RESET}\e]8;;\a"
     echo -e "${C_YELLOW}Note:${C_RESET} For restic official documentation See: https://restic.readthedocs.io/"
