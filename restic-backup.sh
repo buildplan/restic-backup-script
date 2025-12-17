@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#           Restic Backup Script v0.41 - 2025.11.24
+#           Restic Backup Script v0.42 - 2025.12.17
 # =================================================================
 
-export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.41"
+SCRIPT_VERSION="0.42"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 PROG_NAME=$(basename "$0"); readonly PROG_NAME
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
@@ -34,6 +34,77 @@ else
     C_YELLOW=''
     C_CYAN=''
 fi
+
+# --- Ensure running as root ---
+display_help() {
+    local readme_url="https://github.com/buildplan/restic-backup-script/blob/main/README.md"
+
+    echo -e "${C_BOLD}${C_CYAN}Restic Backup Script (v${SCRIPT_VERSION})${C_RESET}"
+    echo "Encrypted, deduplicated backups with restic."
+    echo
+    echo -e "${C_BOLD}${C_YELLOW}USAGE:${C_RESET}"
+    echo -e "  sudo $PROG_NAME ${C_GREEN}[options] [command]${C_RESET}"
+    echo
+    echo -e "${C_BOLD}${C_YELLOW}OPTIONS:${C_RESET}"
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--verbose" "Show detailed live output."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--fix-permissions" "Interactive only: auto-fix 600/400 on conf/secret."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--help, -h" "Display this help message."
+    echo
+    echo -e "${C_BOLD}${C_YELLOW}COMMANDS:${C_RESET}"
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "[no command]" "Run a standard backup and apply the retention policy."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--init" "Initialize a new restic repository (one-time setup)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--diff" "Show a summary of changes between the last two snapshots."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots" "List all available snapshots in the repository."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots-delete" "Interactively select and permanently delete snapshots."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--stats" "Display repository size and file counts."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check" "Verify repository integrity (subset)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check-full" "Verify all repository data (slow)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Apply retention policy; optionally prune."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--unlock" "Remove stale repository locks."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dump <id> <path>" "Dump a single file from a snapshot to stdout."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--restore" "Interactive restore wizard."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--ls <snapshot_id>" "List files and directories inside a specific snapshot."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--find <pattern...>" "Search for files/dirs across all snapshots (e.g., --find \"*.log\" -l)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--background-restore" "Run a non-interactive restore in the background."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--sync-restore" "Run a non-interactive restore in the foreground (for cron)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dry-run" "Preview backup changes (no snapshot)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--test" "Validate config, permissions, connectivity."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--install-scheduler" "Install an automated schedule (systemd/cron)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--recovery-kit" "Generate a self-contained recovery script (with embedded password)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--uninstall-scheduler" "Remove an automated schedule."
+    echo
+    echo -e "${C_BOLD}${C_YELLOW}QUICK EXAMPLES:${C_RESET}"
+    echo -e "  Run a backup now:            ${C_GREEN}sudo $PROG_NAME${C_RESET}"
+    echo -e "  Verbose diff summary:        ${C_GREEN}sudo $PROG_NAME --verbose --diff${C_RESET}"
+    echo -e "  Fix perms (interactive):     ${C_GREEN}sudo $PROG_NAME --fix-permissions --test${C_RESET}"
+    echo -e "  Background restore:          ${C_GREEN}sudo $PROG_NAME --background-restore latest /mnt/restore${C_RESET}"
+    echo -e "  List snapshot contents:      ${C_GREEN}sudo $PROG_NAME --ls latest /path/to/dir${C_RESET}"
+    echo -e "  Find a file everywhere:      ${C_GREEN}sudo $PROG_NAME --find \"*.log\" -l${C_RESET}"
+    echo -e "  Dump one file to stdout:     ${C_GREEN}sudo $PROG_NAME --dump latest /etc/hosts > hosts.txt${C_RESET}"
+    echo
+    echo -e "${C_BOLD}${C_YELLOW}DEPENDENCIES:${C_RESET}"
+    echo -e "  This script requires: ${C_GREEN}restic, curl, gpg, bzip2, less, jq, flock${C_RESET}"
+    echo
+    local display_log
+    if [ -r "$CONFIG_FILE" ]; then
+        # shellcheck source=/dev/null disable=SC2153
+        display_log=$(source "$CONFIG_FILE" >/dev/null 2>&1; echo "$LOG_FILE")
+    else
+        display_log="(requires sudo to read config)"
+    fi
+    echo -e "Config: ${C_DIM}${CONFIG_FILE}${C_RESET}  Log: ${C_DIM}${display_log:-"(not set)"}${C_RESET}"
+    echo
+    echo -e "For full details, see the online documentation: \e]8;;${readme_url}\a${C_CYAN}README.md${C_RESET}\e]8;;\a"
+    echo -e "${C_YELLOW}Note:${C_RESET} For restic official documentation See: https://restic.readthedocs.io/"
+    echo
+}
+# Scan arguments for help flag immediately
+for arg in "$@"; do
+    if [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
+        display_help
+        exit 0
+    fi
+done
 
 # --- Ensure running as root ---
 if [[ $EUID -ne 0 ]]; then
@@ -194,7 +265,7 @@ check_and_install_restic() {
     echo "Decompressing and installing to /usr/local/bin/restic..."
     if bunzip2 -c "$temp_binary" > /usr/local/bin/restic.tmp; then
         chmod +x /usr/local/bin/restic.tmp
-        mv /usr/local/bin/restic.tmp /usr/local/bin/restic        
+        mv /usr/local/bin/restic.tmp /usr/local/bin/restic
         if [[ "$IS_SELINUX_DISTRO" == "true" ]] && command -v restorecon &>/dev/null; then
             echo "Applying SELinux context to binary..."
             restorecon -v /usr/local/bin/restic || true
@@ -295,62 +366,6 @@ done
 # =================================================================
 # UTILITY FUNCTIONS
 # =================================================================
-
-display_help() {
-    local readme_url="https://github.com/buildplan/restic-backup-script/blob/main/README.md"
-
-    echo -e "${C_BOLD}${C_CYAN}Restic Backup Script (v${SCRIPT_VERSION})${C_RESET}"
-    echo "Encrypted, deduplicated backups with restic."
-    echo
-    echo -e "${C_BOLD}${C_YELLOW}USAGE:${C_RESET}"
-    echo -e "  sudo $PROG_NAME ${C_GREEN}[options] [command]${C_RESET}"
-    echo
-    echo -e "${C_BOLD}${C_YELLOW}OPTIONS:${C_RESET}"
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--verbose" "Show detailed live output."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--fix-permissions" "Interactive only: auto-fix 600/400 on conf/secret."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--help, -h" "Display this help message."
-    echo
-    echo -e "${C_BOLD}${C_YELLOW}COMMANDS:${C_RESET}"
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "[no command]" "Run a standard backup and apply the retention policy."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--init" "Initialize a new restic repository (one-time setup)."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--diff" "Show a summary of changes between the last two snapshots."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots" "List all available snapshots in the repository."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--snapshots-delete" "Interactively select and permanently delete snapshots."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--stats" "Display repository size and file counts."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check" "Verify repository integrity (subset)."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check-full" "Verify all repository data (slow)."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Apply retention policy; optionally prune."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--unlock" "Remove stale repository locks."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dump <id> <path>" "Dump a single file from a snapshot to stdout."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--restore" "Interactive restore wizard."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--ls <snapshot_id>" "List files and directories inside a specific snapshot."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--find <pattern...>" "Search for files/dirs across all snapshots (e.g., --find \"*.log\" -l)."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--background-restore" "Run a non-interactive restore in the background."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--sync-restore" "Run a non-interactive restore in the foreground (for cron)."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dry-run" "Preview backup changes (no snapshot)."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--test" "Validate config, permissions, connectivity."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--install-scheduler" "Install an automated schedule (systemd/cron)."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--recovery-kit" "Generate a self-contained recovery script (with embedded password)."
-    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--uninstall-scheduler" "Remove an automated schedule."
-    echo
-    echo -e "${C_BOLD}${C_YELLOW}QUICK EXAMPLES:${C_RESET}"
-    echo -e "  Run a backup now:            ${C_GREEN}sudo $PROG_NAME${C_RESET}"
-    echo -e "  Verbose diff summary:        ${C_GREEN}sudo $PROG_NAME --verbose --diff${C_RESET}"
-    echo -e "  Fix perms (interactive):     ${C_GREEN}sudo $PROG_NAME --fix-permissions --test${C_RESET}"
-    echo -e "  Background restore:          ${C_GREEN}sudo $PROG_NAME --background-restore latest /mnt/restore${C_RESET}"
-    echo -e "  List snapshot contents:      ${C_GREEN}sudo $PROG_NAME --ls latest /path/to/dir${C_RESET}"
-    echo -e "  Find a file everywhere:      ${C_GREEN}sudo $PROG_NAME --find \"*.log\" -l${C_RESET}"
-    echo -e "  Dump one file to stdout:     ${C_GREEN}sudo $PROG_NAME --dump latest /etc/hosts > hosts.txt${C_RESET}"
-    echo
-    echo -e "${C_BOLD}${C_YELLOW}DEPENDENCIES:${C_RESET}"
-    echo -e "  This script requires: ${C_GREEN}restic, curl, gpg, bzip2, less, jq, flock${C_RESET}"
-    echo
-    echo -e "Config: ${C_DIM}${CONFIG_FILE}${C_RESET}  Log: ${C_DIM}${LOG_FILE:-"(not set)"}${C_RESET}"
-    echo
-    echo -e "For full details, see the online documentation: \e]8;;${readme_url}\a${C_CYAN}README.md${C_RESET}\e]8;;\a"
-    echo -e "${C_YELLOW}Note:${C_RESET} For restic official documentation See: https://restic.readthedocs.io/"
-    echo
-}
 
 detect_distro() {
     if [ -f /etc/os-release ]; then
@@ -808,6 +823,9 @@ cleanup() {
     if [ -n "${LOCK_FD:-}" ]; then
         flock -u "$LOCK_FD"
     fi
+    if [ -n "$(jobs -p)" ]; then
+        pkill -P $$ || true
+    fi
 }
 
 run_preflight_checks() {
@@ -929,6 +947,18 @@ run_preflight_checks() {
             echo -e "${C_DIM}    Run the --unlock command to remove them.${C_RESET}"
         fi
     else
+        if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
+    fi
+    # Disk Space Check for restic cache
+    local check_dir="${RESTIC_CACHE_DIR:-/tmp}"
+    mkdir -p "$check_dir" 2>/dev/null || true
+    if command -v df >/dev/null && command -v awk >/dev/null; then
+        if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Free space check ($check_dir)..."; fi
+        local available_kb
+        available_kb=$(df -k --output=avail "$check_dir" | tail -n1)
+        if [[ "$available_kb" -lt 512000 ]]; then
+             handle_failure "Insufficient free space in $check_dir. Need >500MB, found $((available_kb/1024))MB." "16"
+        fi
         if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     fi
     # Backup Sources
@@ -1880,9 +1910,6 @@ case "${1:-}" in
     --unlock)
         run_preflight_checks "unlock" "quiet"
         run_unlock
-        ;;
-    --help | -h)
-        display_help
         ;;
     *)
         if [ -n "${1:-}" ]; then
