@@ -63,6 +63,7 @@ display_help() {
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--unlock" "Remove stale repository locks."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dump <id> <path>" "Dump a single file from a snapshot to stdout."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--restore" "Interactive restore wizard."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--exact-ownership" "Perserve raw ownership, to use with restore flags."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--ls <snapshot_id>" "List files and directories inside a specific snapshot."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--find <pattern...>" "Search for files/dirs across all snapshots (e.g., --find \"*.log\" -l)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--background-restore" "Run a non-interactive restore in the background."
