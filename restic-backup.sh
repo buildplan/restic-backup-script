@@ -1485,7 +1485,7 @@ run_restore() {
     else
         SKIP_OWNERSHIP_FIX=false
     fi
-    
+
     local include_paths=()
     read -rp "Optional: Enter specific file(s) to restore, separated by spaces (leave blank for full restore): " -a include_paths
     local restic_cmd=(restic restore "$snapshot_id" --target "$restore_dest" --verbose)
@@ -1547,23 +1547,23 @@ run_restore() {
 
 _handle_restore_ownership() {
     local restore_dest="$1"
-
-    if [[ "${SKIP_OWNERSHIP_FIX:-false}" == "true" ]]; then
-        log_message "Skipping ownership fix (Exact ownership requested)."
-        return 0
-    fi
-
+    local dest_user=""
     if [[ "$restore_dest" == /home/* ]]; then
-        local dest_user
         dest_user=$(stat -c %U "$(dirname "$restore_dest")" 2>/dev/null || echo "${restore_dest#/home/}" | cut -d/ -f1)
-
-        if [[ -n "$dest_user" ]] && id -u "$dest_user" &>/dev/null; then
-            log_message "Home directory detected. Setting ownership of restored files to '$dest_user'."
-            if chown -R "${dest_user}:${dest_user}" "$restore_dest"; then
-                log_message "Successfully changed ownership of $restore_dest to $dest_user"
-            else
-                log_message "WARNING: Failed to change ownership of $restore_dest to $dest_user. Please check permissions manually."
-            fi
+    fi
+    if [[ -n "$dest_user" ]] && id -u "$dest_user" &>/dev/null; then
+        if [ -d "$restore_dest" ]; then
+            chown "$dest_user:$dest_user" "$restore_dest"
+        fi
+        if [[ "${SKIP_OWNERSHIP_FIX:-false}" == "true" ]]; then
+            log_message "Exact ownership requested: Fixed access to $restore_dest, but preserved raw IDs inside."
+            return 0
+        fi
+        log_message "Home directory detected. Recursively setting ownership to '$dest_user'."
+        if chown -R "${dest_user}:${dest_user}" "$restore_dest"; then
+            log_message "Successfully changed ownership of $restore_dest to $dest_user"
+        else
+            log_message "WARNING: Failed to change ownership of $restore_dest. Check permissions."
         fi
     fi
 }
