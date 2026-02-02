@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#           Restic Backup Script v0.42 - 2025.12.17
+#           Restic Backup Script v0.43 - 2026.02.02
 # =================================================================
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
@@ -9,7 +9,7 @@ set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.42"
+SCRIPT_VERSION="0.43"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 PROG_NAME=$(basename "$0"); readonly PROG_NAME
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
@@ -1473,6 +1473,18 @@ run_restore() {
         fi
         log_message "WARNING: User confirmed dangerous restore to: $restore_dest"
     fi
+
+    echo -e "\n${C_YELLOW}Ownership Handling:${C_RESET}"
+    echo "  n) Auto-fix ownership (Best for standard user files in /home)"
+    echo "  y) Preserve exact backup UIDs/GIDs (Required for Docker/Databases)"
+    read -rp "Preserve exact raw ownership? (y/n) [n]: " preserve_confirm
+    if [[ "${preserve_confirm,,}" == "y" || "${preserve_confirm,,}" == "yes" ]]; then
+        SKIP_OWNERSHIP_FIX=true
+        echo -e "${C_CYAN}ℹ️  Exact ownership will be preserved (no auto-fix).${C_RESET}"
+    else
+        SKIP_OWNERSHIP_FIX=false
+    fi
+    
     local include_paths=()
     read -rp "Optional: Enter specific file(s) to restore, separated by spaces (leave blank for full restore): " -a include_paths
     local restic_cmd=(restic restore "$snapshot_id" --target "$restore_dest" --verbose)
@@ -1534,6 +1546,11 @@ run_restore() {
 
 _handle_restore_ownership() {
     local restore_dest="$1"
+
+    if [[ "${SKIP_OWNERSHIP_FIX:-false}" == "true" ]]; then
+        log_message "Skipping ownership fix (Exact ownership requested)."
+        return 0
+    fi
 
     if [[ "$restore_dest" == /home/* ]]; then
         local dest_user
@@ -1754,11 +1771,16 @@ EOF
 
 # 1. Parse flags.
 VERBOSE_MODE=false
+SKIP_OWNERSHIP_FIX=false
 AUTO_FIX_PERMS=${AUTO_FIX_PERMS:-false}
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --verbose)
       VERBOSE_MODE=true
+      shift
+      ;;
+    --exact-ownership)
+      SKIP_OWNERSHIP_FIX=true
       shift
       ;;
     --fix-permissions)
