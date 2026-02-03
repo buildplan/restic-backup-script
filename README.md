@@ -90,6 +90,7 @@ For those familiar with setting up backup scripts, here is a fast track to get y
 - `sudo ./restic-backup.sh --restore` — Interactive restore wizard with dry-run preview.
 - `sudo ./restic-backup.sh --dump <id> <path>` - Dump a single file from a snapshot to stdout.
 - `sudo ./restic-backup.sh --background-restore <snapshot> <dest>` — Non-blocking background restore (logs to /tmp).
+- `sudo ./restic-backup.sh --exact-ownership --restore` — To use with any of the restore flags to perserve files ownership.
 - `sudo ./restic-backup.sh --sync-restore <snapshot> <dest>` — Blocking restore suitable for cron/automation.
 - `sudo ./restic-backup.sh --forget` — Apply retention policy (optionally prunes).
 - `sudo ./restic-backup.sh --diff` — Summary of changes between the last two snapshots.
