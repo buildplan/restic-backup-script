@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#           Restic Backup Script v0.43 - 2026.02.02
+#           Restic Backup Script v0.44 - 2026.03.27
 # =================================================================
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
@@ -9,7 +9,7 @@ set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.43"
+SCRIPT_VERSION="0.44"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 PROG_NAME=$(basename "$0"); readonly PROG_NAME
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
@@ -35,7 +35,6 @@ else
     C_CYAN=''
 fi
 
-# --- Ensure running as root ---
 display_help() {
     local readme_url="https://github.com/buildplan/restic-backup-script/blob/main/README.md"
 
@@ -73,6 +72,11 @@ display_help() {
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--install-scheduler" "Install an automated schedule (systemd/cron)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--recovery-kit" "Generate a self-contained recovery script (with embedded password)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--uninstall-scheduler" "Remove an automated schedule."
+    echo
+    echo -e "${C_BOLD}${C_YELLOW}CONFIG FEATURES:${C_RESET} (Managed in ${CONFIG_FILE})"
+    echo -e "  ${C_CYAN}Smart Exclusions:${C_RESET}  Auto-skips directories with CACHEDIR.TAG or custom files (e.g., .nobackup)."
+    echo -e "  ${C_CYAN}Time Retention:${C_RESET}    Keep-within policies (e.g., 30d, 1y) for resilient snapshot coverage."
+    echo -e "  ${C_CYAN}Resource Limits:${C_RESET}   Control CPU usage, SFTP connections, and upload bandwidth."
     echo
     echo -e "${C_BOLD}${C_YELLOW}QUICK EXAMPLES:${C_RESET}"
     echo -e "  Run a backup now:            ${C_GREEN}sudo $PROG_NAME${C_RESET}"
@@ -444,6 +448,16 @@ build_backup_command() {
     [ -n "${COMPRESSION:-}" ] && cmd+=(--compression "$COMPRESSION")
     [ -n "${PACK_SIZE:-}" ] && cmd+=(--pack-size "$PACK_SIZE")
     [ "${ONE_FILE_SYSTEM:-false}" = "true" ] && cmd+=(--one-file-system)
+    if [ "${EXCLUDE_CACHES:-false}" = "true" ]; then
+        cmd+=(--exclude-caches)
+    fi
+    if declare -p EXCLUDE_IF_PRESENT 2>/dev/null | grep -q "declare -a"; then
+        for f in "${EXCLUDE_IF_PRESENT[@]}"; do
+            cmd+=(--exclude-if-present "$f")
+        done
+    elif [ -n "${EXCLUDE_IF_PRESENT:-}" ]; then
+        cmd+=(--exclude-if-present "$EXCLUDE_IF_PRESENT")
+    fi
     [ -n "${EXCLUDE_FILE:-}" ] && [ -f "$EXCLUDE_FILE" ] && cmd+=(--exclude-file "$EXCLUDE_FILE")
     [ -n "${EXCLUDE_TEMP_FILE:-}" ] && cmd+=(--exclude-file "$EXCLUDE_TEMP_FILE")
     cmd+=("${BACKUP_SOURCES[@]}")
@@ -1383,11 +1397,18 @@ run_forget() {
     read -ra v_flags <<< "$(get_verbosity_flags)"
     forget_cmd+=("${v_flags[@]}")
     forget_cmd+=(forget)
+    # Count-based retention
     [ -n "${KEEP_LAST:-}" ] && forget_cmd+=(--keep-last "$KEEP_LAST")
     [ -n "${KEEP_DAILY:-}" ] && forget_cmd+=(--keep-daily "$KEEP_DAILY")
     [ -n "${KEEP_WEEKLY:-}" ] && forget_cmd+=(--keep-weekly "$KEEP_WEEKLY")
     [ -n "${KEEP_MONTHLY:-}" ] && forget_cmd+=(--keep-monthly "$KEEP_MONTHLY")
     [ -n "${KEEP_YEARLY:-}" ] && forget_cmd+=(--keep-yearly "$KEEP_YEARLY")
+    # Time-based retention
+    [ -n "${KEEP_WITHIN:-}" ] && forget_cmd+=(--keep-within "$KEEP_WITHIN")
+    [ -n "${KEEP_WITHIN_DAILY:-}" ] && forget_cmd+=(--keep-within-daily "$KEEP_WITHIN_DAILY")
+    [ -n "${KEEP_WITHIN_WEEKLY:-}" ] && forget_cmd+=(--keep-within-weekly "$KEEP_WITHIN_WEEKLY")
+    [ -n "${KEEP_WITHIN_MONTHLY:-}" ] && forget_cmd+=(--keep-within-monthly "$KEEP_WITHIN_MONTHLY")
+    [ -n "${KEEP_WITHIN_YEARLY:-}" ] && forget_cmd+=(--keep-within-yearly "$KEEP_WITHIN_YEARLY")
     [ "${PRUNE_AFTER_FORGET:-true}" = "true" ] && forget_cmd+=(--prune)
     if run_with_priority "${forget_cmd[@]}" 2>&1 | tee -a "$LOG_FILE"; then
         log_message "Retention policy applied successfully"
