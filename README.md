@@ -92,6 +92,7 @@ For those familiar with setting up backup scripts, here is a fast track to get y
 - `sudo ./restic-backup.sh --background-restore <snapshot> <dest>` — Non-blocking background restore (logs to /tmp).
 - `sudo ./restic-backup.sh --exact-ownership --restore` — To use with any of the restore flags to perserve files ownership.
 - `sudo ./restic-backup.sh --sync-restore <snapshot> <dest>` — Blocking restore suitable for cron/automation.
+- `sudo ./restic-backup.sh --cache-cleanup` — Remove old/orphaned cache directories.
 - `sudo ./restic-backup.sh --forget` — Apply retention policy (optionally prunes).
 - `sudo ./restic-backup.sh --diff` — Summary of changes between the last two snapshots.
 - `sudo ./restic-backup.sh --stats` — Repository stats (logical/physical sizes).
