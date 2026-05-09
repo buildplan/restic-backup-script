@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#           Restic Backup Script v0.44 - 2026.03.27
+#           Restic Backup Script v0.45 - 2026.05.09
 # =================================================================
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
@@ -9,7 +9,7 @@ set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.44"
+SCRIPT_VERSION="0.45"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 PROG_NAME=$(basename "$0"); readonly PROG_NAME
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
@@ -58,6 +58,7 @@ display_help() {
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--stats" "Display repository size and file counts."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check" "Verify repository integrity (subset)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--check-full" "Verify all repository data (slow)."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--cache-cleanup" "Remove old/orphaned cache directories."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--forget" "Apply retention policy; optionally prune."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--unlock" "Remove stale repository locks."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--dump <id> <path>" "Dump a single file from a snapshot to stdout."
@@ -1421,6 +1422,19 @@ run_forget() {
     fi
 }
 
+run_cache_cleanup() {
+    echo -e "${C_BOLD}--- Cleaning Restic Cache ---${C_RESET}"
+    log_message "Running restic cache --cleanup"
+    if restic cache --cleanup; then
+        echo -e "${C_GREEN}✅ Cache cleanup completed successfully.${C_RESET}"
+        log_message "Cache cleanup successful."
+    else
+        echo -e "${C_RED}❌ Cache cleanup failed.${C_RESET}" >&2
+        log_message "ERROR: Cache cleanup failed."
+        return 1
+    fi
+}
+
 run_check() {
     echo -e "${C_BOLD}--- Checking Repository Integrity ---${C_RESET}"
     log_message "Running integrity check"
@@ -1933,6 +1947,10 @@ case "${1:-}" in
     --forget)
         run_preflight_checks "backup" "quiet"
         run_forget
+        ;;
+    --cache-cleanup)
+        run_preflight_checks "cache" "quiet"
+        run_cache_cleanup
         ;;
     --diff)
         run_preflight_checks "diff" "quiet"
