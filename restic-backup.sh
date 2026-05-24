@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#           Restic Backup Script v0.45 - 2026.05.09
+#           Restic Backup Script v0.46 - 2026.05.24
 # =================================================================
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
@@ -9,7 +9,7 @@ set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.45"
+SCRIPT_VERSION="0.46"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 PROG_NAME=$(basename "$0"); readonly PROG_NAME
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
@@ -46,6 +46,7 @@ display_help() {
     echo
     echo -e "${C_BOLD}${C_YELLOW}OPTIONS:${C_RESET}"
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--verbose" "Show detailed live output."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--fallback" "Temporarily route command to the fallback repository."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--fix-permissions" "Interactive only: auto-fix 600/400 on conf/secret."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--help, -h" "Display this help message."
     echo
@@ -811,8 +812,24 @@ send_notification() {
 }
 
 setup_environment() {
-    export RESTIC_REPOSITORY
-    export RESTIC_PASSWORD_FILE
+    # Handle Fallback Routing
+    if [[ "${USE_FALLBACK:-false}" == "true" ]]; then
+        if [ -z "${RESTIC_FALLBACK_REPOSITORY:-}" ]; then
+            echo -e "${C_RED}ERROR: --fallback flag used, but RESTIC_FALLBACK_REPOSITORY is not set in config.${C_RESET}" >&2
+            exit 1
+        fi
+        export RESTIC_REPOSITORY="${RESTIC_FALLBACK_REPOSITORY}"
+        if [ -n "${RESTIC_FALLBACK_PASSWORD_FILE:-}" ]; then
+            export RESTIC_PASSWORD_FILE="${RESTIC_FALLBACK_PASSWORD_FILE}"
+        else
+            export RESTIC_PASSWORD_FILE # Fallback to primary password
+        fi
+        log_message "FALLBACK MODE ENGAGED: Routing to $RESTIC_REPOSITORY"
+        echo -e "${C_YELLOW}⚠️  Running in FALLBACK mode. Using alternate repository.${C_RESET}"
+    else
+        export RESTIC_REPOSITORY
+        export RESTIC_PASSWORD_FILE
+    fi
 
     if [ -n "${GOMAXPROCS_LIMIT:-}" ]; then
         export GOMAXPROCS="${GOMAXPROCS_LIMIT}"
@@ -1808,11 +1825,16 @@ EOF
 # 1. Parse flags.
 VERBOSE_MODE=false
 SKIP_OWNERSHIP_FIX=false
+USE_FALLBACK=false
 AUTO_FIX_PERMS=${AUTO_FIX_PERMS:-false}
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --verbose)
       VERBOSE_MODE=true
+      shift
+      ;;
+    --fallback)
+      USE_FALLBACK=true
       shift
       ;;
     --exact-ownership)
