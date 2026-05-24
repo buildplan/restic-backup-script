@@ -27,6 +27,7 @@ This script automates encrypted, deduplicated backups of local directories using
   - Checks the latest Restic release, downloads checksums and PGP signature.
   - Verifies the signature and checksum before installing (x86_64 and aarch64 supported).
 - **Optional script self-update (interactive)**: Checks GitHub release, downloads, verifies checksum, and updates the script.
+- **3-2-1 backup support**: Supports 3-2-1 backup architecture via the `--fallback` flag.
 
 -----
 
@@ -102,6 +103,7 @@ For those familiar with setting up backup scripts, here is a fast track to get y
 - `sudo ./restic-backup.sh --ls [snapshot_id] [path ...]` — List files/dirs within a snapshot (paged with `less`).
 - `sudo ./restic-backup.sh --find <pattern...>` - Search for files/dirs across all snapshots (e.g., --find \"*.log\" -l).
 - `sudo ./restic-backup.sh --recovery-kit` - Generate a self-contained recovery script (with embedded password).
+- `sudo ./restic-backup.sh --fallback` - Temporarily route command to the fallback repository.
 
 Tip: `--verbose` is interactive; cron should use the default quiet mode. The script auto-reexecs with sudo if not run as root.
 
@@ -174,6 +176,93 @@ sudo ./restic-backup.sh --sync-restore latest /mnt/local-backup-copy
 # Ensure a process runs only after a restore
 sudo ./restic-backup.sh --sync-restore latest /srv/app/data && systemctl restart my-app
 ```
+
+-----
+
+## 3-2-1 Backup Strategy & Fallback Mode
+
+This script supports 3-2-1 backup architecture via the `--fallback` flag.
+
+If your primary cloud repository (e.g., a Hetzner Storage Box or AWS S3) becomes unreachable, you can instantly route any read/restore command to a secondary mirrored repository (e.g., a local NAS) without altering your core configuration.
+
+### Prerequisite & Core Assumption
+
+**This script does not automatically replicate or synchronize your data between different storage backends.** To utilize Fallback Mode, **it is assumed that you have independently configured an automated synchronization or mirroring task** (using tools like `rsync`, `rclone`, or your storage platform's native replication tools) that pulls or pushes a **1:1 exact copy** of your primary Restic repository directory to your local NAS or alternative remote server. 
+
+Because Restic repositories are completely self-contained and portable, this mirrored directory is immediately readable as a valid repository by the script.
+
+### How it Works
+
+1. **The Mirror:** Your external sync task (e.g., a TrueNAS Rsync Pull task) runs on its own schedule to mirror your primary repository (like a Hetzner Storage Box) to a secondary location (like a home server).
+2. **The Config:** Define your secondary mirrored repository URL in `restic-backup.conf`:
+
+   ```bash
+   RESTIC_FALLBACK_REPOSITORY="sftp:local-nas:/mnt/backups/server_01"
+   # Optional: Set RESTIC_FALLBACK_PASSWORD_FILE if the secondary uses a different key
+   ```
+
+3. **The Execution:** Append `--fallback` to any operational command. The script will dynamically swap the environment variables and route the traffic to your mirror.
+
+### Fallback Use Cases
+
+The fallback flag safely works with all non-destructive commands. It is highly recommended to use it for restores if your primary connection is degraded or severed:
+
+```sh
+# Check the integrity of your local mirrored copy
+sudo ./restic-backup.sh --fallback --check
+
+# Browse the files inside your local mirror
+sudo ./restic-backup.sh --fallback --ls latest
+
+# Execute an interactive restore directly from the local mirror
+sudo ./restic-backup.sh --fallback --restore
+```
+
+> **Warning:** Do not run standard backup jobs or `--forget` operations using the `--fallback` flag if your secondary repository is maintained by a one-way sync (like Rsync). Writing new snapshots directly to a synchronized mirror can cause merge conflicts or data loss during the next sync cycle. Use fallback strictly for recovery and verification.
+
+### Setting Up the Secure Fallback Connection
+
+To securely connect a cloud VPS to a home server or NAS (like TrueNAS), **we highly recommend using an Overlay Network / Mesh VPN** (such as Tailscale or NetBird). This assigns a private, static IP to your NAS and allows the VPS to bypass NAT and firewalls without exposing your home SSH port to the public internet.
+
+To configure this secure connection for Restic's fallback mode, follow these steps on your VPS:
+
+**1. Generate and Copy SSH Keys**
+Restic requires passwordless authentication to run automatically. Generate an SSH key on your VPS (if you don't already have one) and copy the public key to your secondary backup server.
+
+```sh
+# Generate a key as root (Press Enter for no passphrase)
+sudo ssh-keygen -t ed25519 -f /root/.ssh/id_fallback_backup
+
+# Copy the PUBLIC key to your NAS/TrueNAS admin user
+# (Replace with your NAS user and Mesh VPN IP)
+sudo ssh-copy-id -i /root/.ssh/id_fallback_backup.pub truenas_admin@100.x.x.x
+```
+
+**2. Configure the SSH Alias**
+Create or edit the SSH config file for the root user to define exactly how the VPS should connect to the NAS. This alias (`local-nas`) is what you will use in your `RESTIC_FALLBACK_REPOSITORY` variable.
+
+```sh
+sudo nano /root/.ssh/config
+```
+
+Add the following block, adjusting the IP and user for your specific Mesh VPN setup:
+
+```text
+Host local-nas
+    HostName 100.x.x.x  # Your Tailscale/NetBird IP
+    User truenas_admin  # The user on your NAS
+    IdentityFile /root/.ssh/id_fallback_backup
+    StrictHostKeyChecking accept-new
+```
+
+**3. Test the Connection**
+Verify that your VPS can successfully tunnel to the NAS without prompting for a password.
+
+```sh
+sudo ssh local-nas pwd
+```
+
+If this command successfully prints the working directory on your NAS, your secure pipeline is established. You can now set `RESTIC_FALLBACK_REPOSITORY="sftp:local-nas:/path/to/backup"` in your configuration file.
 
 -----
 
