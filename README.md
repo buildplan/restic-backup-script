@@ -494,6 +494,7 @@ You have two ways to exclude files and directories from your backups:
 
 1. **`EXCLUDE_FILE`**: Point this to a text file (like `restic-excludes.txt`) containing one exclusion pattern per line.
 2. **`EXCLUDE_PATTERNS`**: A space-separated list of patterns to exclude directly in the configuration file (e.g., `*.tmp *.log`).
+3. **`EXCLUDE_CLOUD_FILES`**: Set to `true` to skip cloud-backed placeholder files (e.g., iCloud) on macOS.
 
 #### Performance and behavior
 
@@ -504,7 +505,7 @@ You have two ways to exclude files and directories from your backups:
 - `LIMIT_UPLOAD` — Restic `--limit-upload` (KiB/s).
 - `SFTP_CONNECTIONS` — Sets `-o sftp.connections=<N>` for parallel SFTP connections.
 - `READ_CONCURRENCY` — Restic `--read-concurrency <N>`.
-- `COMPRESSION` — Restic `--compression auto|max|off|...` (requires Restic version with compression support).
+- `COMPRESSION` — Restic `--compression auto|max|off|fastest|better` (requires Restic version with compression support).
 - `PACK_SIZE` — Restic `--pack-size <MiB>`.
 - `ONE_FILE_SYSTEM=true|false` — Restic `--one-file-system`.
 - `RESTIC_CACHE_DIR=/var/cache/restic` — Use a persistent cache (recommended for speed).
@@ -653,6 +654,8 @@ If you prefer to manage the schedule manually instead of using the wizard, you c
   - Skips auto-install in non-interactive (cron) mode; you’ll get a log notification
 
 Both update checks run after the script acquires its lock, to avoid concurrent updates.
+
+> **Tip:** If you run into GitHub API rate limits (e.g., 403 Forbidden) during updates on shared IPs, set `GITHUB_TOKEN` in your `restic-backup.conf` to a Personal Access Token to authenticate the requests.
 
 -----
 
