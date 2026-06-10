@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#           Restic Backup Script v0.46 - 2026.05.24
+#           Restic Backup Script v0.47 - 2026.06.10
 # =================================================================
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
@@ -9,7 +9,7 @@ set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.46"
+SCRIPT_VERSION="0.47"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 PROG_NAME=$(basename "$0"); readonly PROG_NAME
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
@@ -196,7 +196,11 @@ check_and_install_restic() {
         exit 1
     fi
     local release_info
-    release_info=$(curl -s "https://api.github.com/repos/restic/restic/releases/latest")
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        release_info=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" "https://api.github.com/repos/restic/restic/releases/latest")
+    else
+        release_info=$(curl -s "https://api.github.com/repos/restic/restic/releases/latest")
+    fi
     if [ -z "$release_info" ]; then
         echo -e "${C_YELLOW}Could not fetch latest restic version info from GitHub. Skipping check.${C_RESET}"
         return 0
@@ -294,7 +298,11 @@ check_for_script_update() {
     echo -e "${C_BOLD}--- Checking for script updates ---${C_RESET}"
     local SCRIPT_API_URL="https://api.github.com/repos/buildplan/restic-backup-script/releases/latest"
     local release_info
-    release_info=$(curl -sL -H "Cache-Control: no-cache" -H "Pragma: no-cache" "$SCRIPT_API_URL")
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        release_info=$(curl -sL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Cache-Control: no-cache" -H "Pragma: no-cache" "$SCRIPT_API_URL")
+    else
+        release_info=$(curl -sL -H "Cache-Control: no-cache" -H "Pragma: no-cache" "$SCRIPT_API_URL")
+    fi
     local remote_version
     remote_version=$(echo "$release_info" | jq -r '.tag_name | sub("^v"; "")')
     if [ -z "$remote_version" ] || [[ "$remote_version" == "$SCRIPT_VERSION" ]]; then
@@ -452,6 +460,9 @@ build_backup_command() {
     [ "${ONE_FILE_SYSTEM:-false}" = "true" ] && cmd+=(--one-file-system)
     if [ "${EXCLUDE_CACHES:-false}" = "true" ]; then
         cmd+=(--exclude-caches)
+    fi
+    if [ "${EXCLUDE_CLOUD_FILES:-false}" = "true" ]; then
+        cmd+=(--exclude-cloud-files)
     fi
     if declare -p EXCLUDE_IF_PRESENT 2>/dev/null | grep -q "declare -a"; then
         for f in "${EXCLUDE_IF_PRESENT[@]}"; do
