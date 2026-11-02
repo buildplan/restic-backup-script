@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#           Restic Backup Script v0.47 - 2026.06.10
+#           Restic Backup Script v0.48 - 2026.11.02
 # =================================================================
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
@@ -9,7 +9,7 @@ set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.47"
+SCRIPT_VERSION="0.48"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 PROG_NAME=$(basename "$0"); readonly PROG_NAME
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
@@ -485,7 +485,7 @@ run_diff() {
         path_args+=(--path "$p")
     done
     local snapshot_json
-    if ! snapshot_json=$(restic snapshots --json --host "$HOSTNAME" "${path_args[@]}"); then
+    if ! snapshot_json=$(restic snapshots --latest 2 --json --host "$HOSTNAME" "${path_args[@]}"); then
         echo -e "${C_RED}Error: Failed to list snapshots (host/paths).${C_RESET}" >&2
         log_message "ERROR: restic snapshots --json failed in run_diff."
         return 1
@@ -855,6 +855,15 @@ setup_environment() {
     if [ -n "${RESTIC_CACHE_DIR:-}" ]; then
         export RESTIC_CACHE_DIR
         mkdir -p "$RESTIC_CACHE_DIR"
+        export TMPDIR="${RESTIC_CACHE_DIR}"
+    fi
+
+    if [ -n "${PACK_SIZE:-}" ]; then
+        export RESTIC_PACK_SIZE="${PACK_SIZE}"
+    fi
+
+    if [ -n "${COMPRESSION:-}" ]; then
+        export RESTIC_COMPRESSION="${COMPRESSION}"
     fi
     if [ -n "${EXCLUDE_PATTERNS:-}" ]; then
         EXCLUDE_TEMP_FILE=$(mktemp)
@@ -905,7 +914,7 @@ run_preflight_checks() {
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     # --- Performance Settings Validation ---
     if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Performance Settings${C_RESET}"; fi
-    local numeric_vars=("GOMAXPROCS_LIMIT" "LIMIT_THREADS" "LIMIT_UPLOAD" "SFTP_CONNECTIONS")
+    local numeric_vars=("GOMAXPROCS_LIMIT" "LIMIT_THREADS" "LIMIT_UPLOAD" "SFTP_CONNECTIONS" "MIN_CACHE_SPACE_MB")
     for var in "${numeric_vars[@]}"; do
         local value="${!var:-}"
         if [[ -n "$value" ]]; then
@@ -973,35 +982,51 @@ run_preflight_checks() {
     # Repository State
     if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Repository State${C_RESET}"; fi
     if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Repository connectivity and credentials..."; fi
-    if ! restic cat config >/dev/null 2>&1; then
+    local cat_status=0
+    if restic cat config >/dev/null 2>&1; then
+        cat_status=0
+    else
+        cat_status=$?
+    fi
+    if [ "$cat_status" -ne 0 ]; then
         if [[ "$mode" == "init" ]]; then
             if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_YELLOW} SKIP ${C_RESET}] (OK for --init mode)"; fi
             return 0
         fi
-        handle_failure "Cannot access repository. Check credentials or run --init first." "12"
+        case "$cat_status" in
+            10) handle_failure "Repository does not exist at $RESTIC_REPOSITORY. Check path or run --init first." "12" ;;
+            11) handle_failure "Repository is locked by another process (exit code 11). Run --unlock if stale." "12" ;;
+            12) handle_failure "Incorrect repository password for $RESTIC_REPOSITORY." "12" ;;
+            *)  handle_failure "Cannot access repository (exit code $cat_status). Check connectivity or credentials." "12" ;;
+        esac
     fi
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
-    if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Stale repository locks..."; fi
-    local lock_info
-    lock_info=$(restic list locks 2>/dev/null || true)
-    if [ -n "$lock_info" ]; then
-        if [[ "$verbosity" == "verbose" ]]; then
+    if [[ "$verbosity" == "verbose" ]]; then
+        printf "    %-65s" "Stale repository locks..."
+        local lock_info
+        lock_info=$(restic list locks 2>/dev/null || true)
+        if [ -n "$lock_info" ]; then
             echo -e "[${C_YELLOW} WARN ${C_RESET}]"
             echo -e "${C_YELLOW}    ⚠️  Stale locks found! This may prevent backups from running.${C_RESET}"
             echo -e "${C_DIM}    Run the --unlock command to remove them.${C_RESET}"
+        else
+            echo -e "[${C_GREEN}  OK  ${C_RESET}]"
         fi
-    else
-        if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     fi
     # Disk Space Check for restic cache
     local check_dir="${RESTIC_CACHE_DIR:-/tmp}"
     mkdir -p "$check_dir" 2>/dev/null || true
     if command -v df >/dev/null && command -v awk >/dev/null; then
         if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Free space check ($check_dir)..."; fi
+        local min_space_mb="${MIN_CACHE_SPACE_MB:-500}"
+        if ! [[ "$min_space_mb" =~ ^[0-9]+$ ]] || [ "$min_space_mb" -le 0 ]; then
+            handle_failure "MIN_CACHE_SPACE_MB must be a positive integer, got '$min_space_mb'" "16"
+        fi
+        local min_space_kb=$((min_space_mb * 1024))
         local available_kb
         available_kb=$(df -k --output=avail "$check_dir" | tail -n1)
-        if [[ "$available_kb" -lt 512000 ]]; then
-             handle_failure "Insufficient free space in $check_dir. Need >500MB, found $((available_kb/1024))MB." "16"
+        if [[ "$available_kb" -lt "$min_space_kb" ]]; then
+             handle_failure "Insufficient free space in $check_dir. Need >${min_space_mb}MB, found $((available_kb/1024))MB." "16"
         fi
         if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     fi
@@ -1139,7 +1164,7 @@ run_install_scheduler() {
         echo
         read -rp "Proceed with installation? (y/n): " confirm
         if [[ "${confirm,,}" != "y" ]]; then echo "Aborted."; return 1; fi
-        install_systemd_timer "$script_path" "$systemd_schedule" "$CONFIG_FILE"
+        install_systemd_timer "$script_path" "$systemd_schedule"
     else
         echo -e "  ${C_DIM}Scheduler:${C_RESET}   crontab"
         printf "  ${C_DIM}Schedule:%b\n%s${C_RESET}\n" "${C_RESET}" "$cron_schedule"
@@ -1153,7 +1178,6 @@ run_install_scheduler() {
 install_systemd_timer() {
     local script_path="$1"
     local schedule="$2"
-    local config_file="$3"
     local service_file="/etc/systemd/system/restic-backup.service"
     local timer_file="/etc/systemd/system/restic-backup.timer"
 
@@ -1170,7 +1194,6 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-EnvironmentFile=$config_file
 ExecStart=$script_path
 User=root
 Group=root
@@ -1183,6 +1206,7 @@ Description=Run Restic Backup on a schedule
 
 [Timer]
 Persistent=true
+RandomizedDelaySec=15m
 EOF
     while IFS= read -r schedule_line; do
         if [ -n "$schedule_line" ]; then
@@ -1378,10 +1402,22 @@ run_backup() {
     local backup_cmd=()
     mapfile -t backup_cmd < <(build_backup_command)
     local backup_log; backup_log=$(mktemp)
-    local backup_success=false
+
+    local restic_status=0
     if run_with_priority "${backup_cmd[@]}" 2>&1 | tee "$backup_log"; then
-        backup_success=true
+        restic_status=0
+    else
+        restic_status="${PIPESTATUS[0]}"
+        [ "$restic_status" -eq 0 ] && restic_status=1
     fi
+
+    local snapshot_id=""
+    if grep -qE "snapshot [a-f0-9]+ saved" "$backup_log" 2>/dev/null; then
+        snapshot_id=$(grep -E -o "snapshot [a-f0-9]+ saved" "$backup_log" | tail -1 | awk '{print $2}')
+    elif [[ "$restic_status" -eq 0 || "$restic_status" -eq 3 ]]; then
+        snapshot_id=$(restic snapshots --latest 1 --json --host "$HOSTNAME" 2>/dev/null | jq -r '.[0].id // empty' 2>/dev/null || true)
+    fi
+
     local files_new files_changed files_unmodified
     local data_added data_processed
     if grep -q "Files:" "$backup_log"; then
@@ -1395,27 +1431,77 @@ run_backup() {
     rm -f "$backup_log"
     local end_time; end_time=$(date +%s)
     local duration; duration=$((end_time - start_time))
-    if [ "$backup_success" = true ]; then
-        log_message "Backup completed successfully"
-        echo -e "${C_GREEN}✅ Backup completed${C_RESET}"
-        local stats_msg
-        printf -v stats_msg "Files: %s new, %s changed, %s unmodified\nProcessed: %s\nData added: %s\nDuration: %dm %ds" \
-            "${files_new:-0}" \
-            "${files_changed:-0}" \
-            "${files_unmodified:-0}" \
-            "${data_processed:-0}" \
-            "${data_added:-Not applicable}" \
-            "$((duration / 60))" \
-            "$((duration % 60))"
-        send_notification "Backup SUCCESS: $HOSTNAME" "white_check_mark" \
-            "${NTFY_PRIORITY_SUCCESS}" "success" "$stats_msg"
-    else
-        log_message "ERROR: Backup failed"
-        echo -e "${C_RED}❌ Backup failed${C_RESET}" >&2
-        send_notification "Backup FAILED: $HOSTNAME" "x" \
-            "${NTFY_PRIORITY_FAILURE}" "failure" "Backup failed after $((duration / 60))m ${duration % 60}s"
-        return 1
-    fi
+
+    local stats_msg
+    printf -v stats_msg "Snapshot: %s\nFiles: %s new, %s changed, %s unmodified\nProcessed: %s\nData added: %s\nDuration: %dm %ds" \
+        "${snapshot_id:-N/A}" \
+        "${files_new:-0}" \
+        "${files_changed:-0}" \
+        "${files_unmodified:-0}" \
+        "${data_processed:-0}" \
+        "${data_added:-Not applicable}" \
+        "$((duration / 60))" \
+        "$((duration % 60))"
+
+    case "$restic_status" in
+        0)
+            log_message "Backup completed successfully (Snapshot: ${snapshot_id:-N/A})"
+            echo -e "${C_GREEN}✅ Backup completed (Snapshot: ${snapshot_id:-N/A})${C_RESET}"
+            send_notification "Backup SUCCESS: $HOSTNAME" "white_check_mark" \
+                "${NTFY_PRIORITY_SUCCESS}" "success" "$stats_msg"
+            return 0
+            ;;
+        3)
+            # Restic exit code 3: Some source data could not be read (an incomplete snapshot was created)
+            if [ "${ALLOW_INCOMPLETE_BACKUP:-true}" = "true" ]; then
+                log_message "WARNING: Backup completed with warnings: some source files were unreadable (Snapshot: ${snapshot_id:-N/A})"
+                echo -e "${C_YELLOW}⚠️  Backup completed with unreadable files (Snapshot: ${snapshot_id:-N/A})${C_RESET}"
+                local warning_msg
+                printf -v warning_msg "Some files could not be read during backup (Snapshot: %s).\n\n%s" \
+                    "${snapshot_id:-N/A}" "$stats_msg"
+                send_notification "Backup WARNING: $HOSTNAME" "warning" \
+                    "${NTFY_PRIORITY_WARNING}" "warning" "$warning_msg"
+                return 0
+            else
+                log_message "ERROR: Incomplete backup rejected by configuration (exit code 3, Snapshot: ${snapshot_id:-N/A})"
+                echo -e "${C_RED}❌ Backup failed: some files could not be read (exit code 3, Snapshot: ${snapshot_id:-N/A})${C_RESET}" >&2
+                local failure_msg
+                printf -v failure_msg "Backup failed: Some files were unreadable (exit code 3). Incomplete snapshot: %s was created." \
+                    "${snapshot_id:-N/A}"
+                send_notification "Backup FAILED: $HOSTNAME" "x" \
+                    "${NTFY_PRIORITY_FAILURE}" "failure" "$failure_msg"
+                return 1
+            fi
+            ;;
+        10)
+            log_message "FATAL: Repository does not exist (exit code 10)"
+            echo -e "${C_RED}❌ Repository does not exist. Check repository path or run --init.${C_RESET}" >&2
+            send_notification "Backup FAILED: $HOSTNAME" "x" \
+                "${NTFY_PRIORITY_FAILURE}" "failure" "Repository does not exist (exit code 10). Check repository path."
+            return 1
+            ;;
+        11)
+            log_message "FATAL: Repository is already locked (exit code 11)"
+            echo -e "${C_RED}❌ Repository is locked by another process (exit code 11). Run --unlock if stale.${C_RESET}" >&2
+            send_notification "Backup FAILED: $HOSTNAME" "x" \
+                "${NTFY_PRIORITY_FAILURE}" "failure" "Repository is locked by another process (exit code 11)."
+            return 1
+            ;;
+        12)
+            log_message "FATAL: Incorrect repository password (exit code 12)"
+            echo -e "${C_RED}❌ Incorrect password for repository (exit code 12).${C_RESET}" >&2
+            send_notification "Backup FAILED: $HOSTNAME" "x" \
+                "${NTFY_PRIORITY_FAILURE}" "failure" "Incorrect repository password (exit code 12)."
+            return 1
+            ;;
+        *)
+            log_message "ERROR: Backup failed with exit code $restic_status"
+            echo -e "${C_RED}❌ Backup failed (exit code $restic_status)${C_RESET}" >&2
+            send_notification "Backup FAILED: $HOSTNAME" "x" \
+                "${NTFY_PRIORITY_FAILURE}" "failure" "Backup failed (exit code $restic_status) after $((duration / 60))m ${duration % 60}s"
+            return 1
+            ;;
+    esac
 }
 
 run_forget() {
@@ -1438,6 +1524,12 @@ run_forget() {
     [ -n "${KEEP_WITHIN_WEEKLY:-}" ] && forget_cmd+=(--keep-within-weekly "$KEEP_WITHIN_WEEKLY")
     [ -n "${KEEP_WITHIN_MONTHLY:-}" ] && forget_cmd+=(--keep-within-monthly "$KEEP_WITHIN_MONTHLY")
     [ -n "${KEEP_WITHIN_YEARLY:-}" ] && forget_cmd+=(--keep-within-yearly "$KEEP_WITHIN_YEARLY")
+    # Grouping and filtering
+    if [ "${FORGET_GROUP_BY+set}" = "set" ]; then
+        forget_cmd+=(--group-by "$FORGET_GROUP_BY")
+    fi
+    [ "${FORGET_HOST_ONLY:-false}" = "true" ] && forget_cmd+=(--host "$HOSTNAME")
+    [ -n "${FORGET_TAG:-}" ] && forget_cmd+=(--tag "$FORGET_TAG")
     [ "${PRUNE_AFTER_FORGET:-true}" = "true" ] && forget_cmd+=(--prune)
     if run_with_priority "${forget_cmd[@]}" 2>&1 | tee -a "$LOG_FILE"; then
         log_message "Retention policy applied successfully"
@@ -1466,14 +1558,19 @@ run_cache_cleanup() {
 run_check() {
     echo -e "${C_BOLD}--- Checking Repository Integrity ---${C_RESET}"
     log_message "Running integrity check"
-    if restic check --read-data-subset=5% 2>&1 | tee -a "$LOG_FILE"; then
-        log_message "Integrity check passed"
-        echo -e "${C_GREEN}✅ Repository integrity OK${C_RESET}"
+    local check_cmd=(restic check)
+    local mode="${CHECK_MODE:-fast}"
+    if [[ "$mode" == "subset" ]]; then
+        check_cmd+=(--read-data-subset="${CHECK_SUBSET_PCT:-5%}")
+    fi
+    if run_with_priority "${check_cmd[@]}" 2>&1 | tee -a "$LOG_FILE"; then
+        log_message "Integrity check passed ($mode)"
+        echo -e "${C_GREEN}✅ Repository integrity OK ($mode)${C_RESET}"
     else
-        log_message "WARNING: Integrity check failed"
-        echo -e "${C_YELLOW}⚠️ Integrity check failed${C_RESET}" >&2
+        log_message "WARNING: Integrity check failed ($mode)"
+        echo -e "${C_YELLOW}⚠️ Integrity check failed ($mode)${C_RESET}" >&2
         send_notification "Repository Warning: $HOSTNAME" "warning" \
-            "${NTFY_PRIORITY_WARNING}" "warning" "Repository integrity check failed"
+            "${NTFY_PRIORITY_WARNING}" "warning" "Repository integrity check failed ($mode)"
     fi
 }
 
@@ -1539,19 +1636,60 @@ run_restore() {
     fi
 
     echo -e "\n${C_YELLOW}Ownership Handling:${C_RESET}"
-    echo "  n) Auto-fix ownership (Best for standard user files in /home)"
-    echo "  y) Preserve exact backup UIDs/GIDs (Required for Docker/Databases)"
-    read -rp "Preserve exact raw ownership? (y/n) [n]: " preserve_confirm
-    if [[ "${preserve_confirm,,}" == "y" || "${preserve_confirm,,}" == "yes" ]]; then
-        SKIP_OWNERSHIP_FIX=true
-        echo -e "${C_CYAN}ℹ️  Exact ownership will be preserved (no auto-fix).${C_RESET}"
-    else
-        SKIP_OWNERSHIP_FIX=false
+    echo "  1) Restore by user and group names (--ownership-by-name) [Modern Restic]"
+    echo "  2) Auto-fix ownership to directory owner (Best for standard user files in /home)"
+    echo "  3) Preserve exact raw backup UIDs/GIDs (Required for Docker/Databases)"
+    read -rp "Enter choice [1]: " ownership_choice
+    ownership_choice=${ownership_choice:-1}
+    local ownership_flag=()
+    case "$ownership_choice" in
+        1)
+            ownership_flag=(--ownership-by-name)
+            SKIP_OWNERSHIP_FIX=true
+            echo -e "${C_CYAN}ℹ️  Ownership will be mapped by username and groupname.${C_RESET}"
+            ;;
+        2)
+            SKIP_OWNERSHIP_FIX=false
+            echo -e "${C_CYAN}ℹ️  Auto-fixing home directory ownership after restore.${C_RESET}"
+            ;;
+        3)
+            SKIP_OWNERSHIP_FIX=true
+            echo -e "${C_CYAN}ℹ️  Preserving raw backup UIDs/GIDs.${C_RESET}"
+            ;;
+        *)
+            ownership_flag=(--ownership-by-name)
+            SKIP_OWNERSHIP_FIX=true
+            ;;
+    esac
+
+    echo -e "\n${C_YELLOW}Overwrite Strategy:${C_RESET}"
+    echo "  1) Always overwrite existing files (--overwrite always) [Default]"
+    echo "  2) Only overwrite if changed (--overwrite if-changed)"
+    echo "  3) Only overwrite if snapshot is newer (--overwrite if-newer)"
+    echo "  4) Never overwrite existing files (--overwrite never)"
+    read -rp "Enter choice [1]: " overwrite_choice
+    overwrite_choice=${overwrite_choice:-1}
+    local overwrite_flag=()
+    case "$overwrite_choice" in
+        2) overwrite_flag=(--overwrite if-changed) ;;
+        3) overwrite_flag=(--overwrite if-newer) ;;
+        4) overwrite_flag=(--overwrite never) ;;
+        *) overwrite_flag=(--overwrite always) ;;
+    esac
+
+    read -rp "Verify restored file integrity against repository hashes after extraction? (y/n) [n]: " verify_confirm
+    local verify_flag=()
+    if [[ "${verify_confirm,,}" == "y" || "${verify_confirm,,}" == "yes" ]]; then
+        verify_flag=(--verify)
+        echo -e "${C_CYAN}ℹ️  Post-restore integrity verification enabled (--verify).${C_RESET}"
     fi
 
     local include_paths=()
     read -rp "Optional: Enter specific file(s) to restore, separated by spaces (leave blank for full restore): " -a include_paths
     local restic_cmd=(restic restore "$snapshot_id" --target "$restore_dest" --verbose)
+    [ ${#ownership_flag[@]} -gt 0 ] && restic_cmd+=("${ownership_flag[@]}")
+    [ ${#overwrite_flag[@]} -gt 0 ] && restic_cmd+=("${overwrite_flag[@]}")
+    [ ${#verify_flag[@]} -gt 0 ] && restic_cmd+=("${verify_flag[@]}")
     if [ ${#include_paths[@]} -gt 0 ]; then
         for path in "${include_paths[@]}"; do
             restic_cmd+=(--include "$path")
@@ -1792,12 +1930,24 @@ recovery_kit() {
 #
 # To use:
 # 1. Install restic on a new system:
-#    (e.g.,) curl -L https://github.com/restic/restic/releases/latest/download/restic_latest_linux_amd64.bz2 | bunzip2 > restic
-#    (e.g.,) chmod +x restic && sudo mv restic /usr/local/bin/
+#    - Official binary (fetch latest release):
+#      LATEST_TAG=\$(curl -s https://api.github.com/repos/restic/restic/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+#      ARCH=\$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
+#      curl -L "https://github.com/restic/restic/releases/download/\${LATEST_TAG}/restic_\${LATEST_TAG#v}_linux_\${ARCH}.bz2" | bunzip2 > restic
+#      chmod +x restic && sudo mv restic /usr/local/bin/
 #
-# 2. Make this script executable: chmod +x ${recovery_file##*/}
-# 3. Run this script OR manually export the variables.
-# 4. Restore your data.
+#    - Or install via package manager:
+#      Debian/Ubuntu: sudo apt-get install restic
+#      RHEL/CentOS:   sudo dnf install restic
+#      Alpine:        sudo apk add restic
+#
+# 2. Storage Credentials / Backend Access:
+#    - If using SFTP (e.g., sftp:storagebox), ensure ~/.ssh/config and SSH private keys are set up.
+#    - If using S3/B2/Azure, ensure your cloud credentials (e.g. AWS_ACCESS_KEY_ID) are exported.
+#
+# 3. Make this script executable: chmod +x ${recovery_file##*/}
+# 4. Run this script OR manually export the variables.
+# 5. Restore your data.
 
 # --- Embedded Configuration ---
 export RESTIC_REPOSITORY="${RESTIC_REPOSITORY}"
