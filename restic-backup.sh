@@ -982,12 +982,23 @@ run_preflight_checks() {
     # Repository State
     if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Repository State${C_RESET}"; fi
     if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Repository connectivity and credentials..."; fi
-    if ! restic cat config >/dev/null 2>&1; then
+    local cat_status=0
+    if restic cat config >/dev/null 2>&1; then
+        cat_status=0
+    else
+        cat_status=$?
+    fi
+    if [ "$cat_status" -ne 0 ]; then
         if [[ "$mode" == "init" ]]; then
             if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_YELLOW} SKIP ${C_RESET}] (OK for --init mode)"; fi
             return 0
         fi
-        handle_failure "Cannot access repository. Check credentials or run --init first." "12"
+        case "$cat_status" in
+            10) handle_failure "Repository does not exist at $RESTIC_REPOSITORY. Run --init first." "10" ;;
+            11) handle_failure "Repository is locked by another process (exit code 11)." "11" ;;
+            12) handle_failure "Incorrect repository password for $RESTIC_REPOSITORY." "12" ;;
+            *)  handle_failure "Cannot access repository (exit code $cat_status). Check connectivity or credentials." "12" ;;
+        esac
     fi
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     if [[ "$verbosity" == "verbose" ]]; then
@@ -1438,14 +1449,20 @@ run_backup() {
             if [ "${ALLOW_INCOMPLETE_BACKUP:-true}" = "true" ]; then
                 log_message "WARNING: Backup completed with warnings: some source files were unreadable (Snapshot: ${snapshot_id:-N/A})"
                 echo -e "${C_YELLOW}⚠️  Backup completed with unreadable files (Snapshot: ${snapshot_id:-N/A})${C_RESET}"
+                local warning_msg
+                printf -v warning_msg "Some files could not be read during backup (Snapshot: %s).\n\n%s" \
+                    "${snapshot_id:-N/A}" "$stats_msg"
                 send_notification "Backup WARNING: $HOSTNAME" "warning" \
-                    "${NTFY_PRIORITY_WARNING}" "warning" "Some files could not be read during backup (Snapshot: ${snapshot_id:-N/A}).\n\n$stats_msg"
+                    "${NTFY_PRIORITY_WARNING}" "warning" "$warning_msg"
                 return 0
             else
-                log_message "ERROR: Incomplete backup rejected by configuration (exit code 3)"
-                echo -e "${C_RED}❌ Backup failed: some files could not be read (exit code 3)${C_RESET}" >&2
+                log_message "ERROR: Incomplete backup rejected by configuration (exit code 3, Snapshot: ${snapshot_id:-N/A})"
+                echo -e "${C_RED}❌ Backup failed: some files could not be read (exit code 3, Snapshot: ${snapshot_id:-N/A})${C_RESET}" >&2
+                local failure_msg
+                printf -v failure_msg "Backup failed: Some files were unreadable (exit code 3). Incomplete snapshot: %s was created." \
+                    "${snapshot_id:-N/A}"
                 send_notification "Backup FAILED: $HOSTNAME" "x" \
-                    "${NTFY_PRIORITY_FAILURE}" "failure" "Backup failed: Some files were unreadable (exit code 3)."
+                    "${NTFY_PRIORITY_FAILURE}" "failure" "$failure_msg"
                 return 1
             fi
             ;;
