@@ -1389,8 +1389,13 @@ run_backup() {
     mapfile -t backup_cmd < <(build_backup_command)
     local backup_log; backup_log=$(mktemp)
 
-    run_with_priority "${backup_cmd[@]}" 2>&1 | tee "$backup_log"
-    local restic_status="${PIPESTATUS[0]}"
+    local restic_status=0
+    if run_with_priority "${backup_cmd[@]}" 2>&1 | tee "$backup_log"; then
+        restic_status=0
+    else
+        restic_status="${PIPESTATUS[0]}"
+        [ "$restic_status" -eq 0 ] && restic_status=1
+    fi
 
     local snapshot_id
     snapshot_id=$(grep -E -o "snapshot [a-f0-9]+ saved" "$backup_log" 2>/dev/null | tail -1 | awk '{print $2}')
@@ -1496,7 +1501,9 @@ run_forget() {
     [ -n "${KEEP_WITHIN_MONTHLY:-}" ] && forget_cmd+=(--keep-within-monthly "$KEEP_WITHIN_MONTHLY")
     [ -n "${KEEP_WITHIN_YEARLY:-}" ] && forget_cmd+=(--keep-within-yearly "$KEEP_WITHIN_YEARLY")
     # Grouping and filtering
-    [ -n "${FORGET_GROUP_BY:-}" ] && forget_cmd+=(--group-by "$FORGET_GROUP_BY")
+    if [ "${FORGET_GROUP_BY+set}" = "set" ]; then
+        forget_cmd+=(--group-by "$FORGET_GROUP_BY")
+    fi
     [ "${FORGET_HOST_ONLY:-false}" = "true" ] && forget_cmd+=(--host "$HOSTNAME")
     [ -n "${FORGET_TAG:-}" ] && forget_cmd+=(--tag "$FORGET_TAG")
     [ "${PRUNE_AFTER_FORGET:-true}" = "true" ] && forget_cmd+=(--prune)
