@@ -914,7 +914,7 @@ run_preflight_checks() {
     if [[ "$verbosity" == "verbose" ]]; then echo -e "[${C_GREEN}  OK  ${C_RESET}]"; fi
     # --- Performance Settings Validation ---
     if [[ "$verbosity" == "verbose" ]]; then echo -e "\n  ${C_DIM}- Checking Performance Settings${C_RESET}"; fi
-    local numeric_vars=("GOMAXPROCS_LIMIT" "LIMIT_THREADS" "LIMIT_UPLOAD" "SFTP_CONNECTIONS")
+    local numeric_vars=("GOMAXPROCS_LIMIT" "LIMIT_THREADS" "LIMIT_UPLOAD" "SFTP_CONNECTIONS" "MIN_CACHE_SPACE_MB")
     for var in "${numeric_vars[@]}"; do
         local value="${!var:-}"
         if [[ -n "$value" ]]; then
@@ -994,8 +994,8 @@ run_preflight_checks() {
             return 0
         fi
         case "$cat_status" in
-            10) handle_failure "Repository does not exist at $RESTIC_REPOSITORY. Run --init first." "10" ;;
-            11) handle_failure "Repository is locked by another process (exit code 11)." "11" ;;
+            10) handle_failure "Repository does not exist at $RESTIC_REPOSITORY. Check path or run --init first." "12" ;;
+            11) handle_failure "Repository is locked by another process (exit code 11). Run --unlock if stale." "12" ;;
             12) handle_failure "Incorrect repository password for $RESTIC_REPOSITORY." "12" ;;
             *)  handle_failure "Cannot access repository (exit code $cat_status). Check connectivity or credentials." "12" ;;
         esac
@@ -1019,6 +1019,9 @@ run_preflight_checks() {
     if command -v df >/dev/null && command -v awk >/dev/null; then
         if [[ "$verbosity" == "verbose" ]]; then printf "    %-65s" "Free space check ($check_dir)..."; fi
         local min_space_mb="${MIN_CACHE_SPACE_MB:-500}"
+        if ! [[ "$min_space_mb" =~ ^[0-9]+$ ]] || [ "$min_space_mb" -le 0 ]; then
+            handle_failure "MIN_CACHE_SPACE_MB must be a positive integer, got '$min_space_mb'" "16"
+        fi
         local min_space_kb=$((min_space_mb * 1024))
         local available_kb
         available_kb=$(df -k --output=avail "$check_dir" | tail -n1)
@@ -1408,8 +1411,12 @@ run_backup() {
         [ "$restic_status" -eq 0 ] && restic_status=1
     fi
 
-    local snapshot_id
-    snapshot_id=$(grep -E -o "snapshot [a-f0-9]+ saved" "$backup_log" 2>/dev/null | tail -1 | awk '{print $2}')
+    local snapshot_id=""
+    if grep -qE "snapshot [a-f0-9]+ saved" "$backup_log" 2>/dev/null; then
+        snapshot_id=$(grep -E -o "snapshot [a-f0-9]+ saved" "$backup_log" | tail -1 | awk '{print $2}')
+    elif [[ "$restic_status" -eq 0 || "$restic_status" -eq 3 ]]; then
+        snapshot_id=$(restic snapshots --latest 1 --json 2>/dev/null | jq -r '.[0].id // empty' 2>/dev/null || true)
+    fi
 
     local files_new files_changed files_unmodified
     local data_added data_processed
@@ -1471,21 +1478,21 @@ run_backup() {
             echo -e "${C_RED}❌ Repository does not exist. Check repository path or run --init.${C_RESET}" >&2
             send_notification "Backup FAILED: $HOSTNAME" "x" \
                 "${NTFY_PRIORITY_FAILURE}" "failure" "Repository does not exist (exit code 10). Check repository path."
-            return 10
+            return 1
             ;;
         11)
             log_message "FATAL: Repository is already locked (exit code 11)"
             echo -e "${C_RED}❌ Repository is locked by another process (exit code 11). Run --unlock if stale.${C_RESET}" >&2
             send_notification "Backup FAILED: $HOSTNAME" "x" \
                 "${NTFY_PRIORITY_FAILURE}" "failure" "Repository is locked by another process (exit code 11)."
-            return 11
+            return 1
             ;;
         12)
             log_message "FATAL: Incorrect repository password (exit code 12)"
             echo -e "${C_RED}❌ Incorrect password for repository (exit code 12).${C_RESET}" >&2
             send_notification "Backup FAILED: $HOSTNAME" "x" \
                 "${NTFY_PRIORITY_FAILURE}" "failure" "Incorrect repository password (exit code 12)."
-            return 12
+            return 1
             ;;
         *)
             log_message "ERROR: Backup failed with exit code $restic_status"
