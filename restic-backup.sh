@@ -1415,7 +1415,7 @@ run_backup() {
     if grep -qE "snapshot [a-f0-9]+ saved" "$backup_log" 2>/dev/null; then
         snapshot_id=$(grep -E -o "snapshot [a-f0-9]+ saved" "$backup_log" | tail -1 | awk '{print $2}')
     elif [[ "$restic_status" -eq 0 || "$restic_status" -eq 3 ]]; then
-        snapshot_id=$(restic snapshots --latest 1 --json 2>/dev/null | jq -r '.[0].id // empty' 2>/dev/null || true)
+        snapshot_id=$(restic snapshots --latest 1 --json --host "$HOSTNAME" 2>/dev/null | jq -r '.[0].id // empty' 2>/dev/null || true)
     fi
 
     local files_new files_changed files_unmodified
