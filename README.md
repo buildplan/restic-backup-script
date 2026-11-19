@@ -80,7 +80,8 @@ For those familiar with setting up backup scripts, here is a fast track to get y
 ### Run Modes
 
 - `sudo ./restic-backup.sh` — Run a standard backup (quiet; suitable for cron).
-- `sudo ./restic-backup.sh --verbose` — Live progress and detailed output.
+- `sudo ./restic-backup.sh --verbose` — Live progress and detailed output (`-v`, or preserves `LOG_LEVEL=3`).
+- `sudo ./restic-backup.sh --very-verbose` — Extra-verbose output (`-vv`; also shows excluded items in restic `>=0.20.0`, useful with `--dry-run`).
 - `sudo ./restic-backup.sh --dry-run` — Preview changes, no snapshot created.
 - `sudo ./restic-backup.sh --check` — Verify repository integrity (subset).
 - `sudo ./restic-backup.sh --check-full` — Full data verification (slow).
@@ -511,8 +512,8 @@ You have two ways to exclude files and directories from your backups:
 - `RESTIC_CACHE_DIR=/var/cache/restic` — Use a persistent cache (recommended for speed).
 - `PROGRESS_FPS_RATE=4` — Smoother progress updates when `--verbose` and interactive.
 - `LOG_LEVEL=0|1|2|3` — Affects restic `--quiet/--verbose` flags:
-  - 0: quiet, 1: default, 2: verbose, 3: extra verbose
-  - `--verbose` flag forces level 2 for interactive runs.
+  - 0: quiet, 1: default, 2: verbose (`-v`), 3: extra verbose (`-vv`, which also logs excluded files/directories in restic `>=0.20.0`)
+  - `--verbose` forces at least level 2 for interactive runs (without downgrading level 3); `--very-verbose` forces level 3.
 
 #### Logging and rotation
 

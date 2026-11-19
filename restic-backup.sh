@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # =================================================================
-#           Restic Backup Script v0.48 - 2026.11.02
+#           Restic Backup Script v0.49 - 2026.11.19
 # =================================================================
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
@@ -9,7 +9,7 @@ set -euo pipefail
 umask 077
 
 # --- Script Constants ---
-SCRIPT_VERSION="0.48"
+SCRIPT_VERSION="0.49"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 PROG_NAME=$(basename "$0"); readonly PROG_NAME
 CONFIG_FILE="${SCRIPT_DIR}/restic-backup.conf"
@@ -46,6 +46,7 @@ display_help() {
     echo
     echo -e "${C_BOLD}${C_YELLOW}OPTIONS:${C_RESET}"
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--verbose" "Show detailed live output."
+    printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--very-verbose" "Enable extra-verbose restic output (-vv, shows excluded items in >=0.20.0)."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--fallback" "Temporarily route command to the fallback repository."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--fix-permissions" "Interactive only: auto-fix 600/400 on conf/secret."
     printf "  ${C_GREEN}%-20s${C_RESET} %s\n" "--help, -h" "Display this help message."
@@ -1335,8 +1336,10 @@ run_uninstall_scheduler() {
 
 get_verbosity_flags() {
     local effective_log_level="${LOG_LEVEL:-1}"
-    if [[ "${VERBOSE_MODE:-}" == "true" ]]; then
-        effective_log_level=2 # Force verbose level 2 when --verbose is used
+    if [[ "${VERY_VERBOSE_MODE:-false}" == "true" ]]; then
+        effective_log_level=3
+    elif [[ "${VERBOSE_MODE:-false}" == "true" ]] && [ "$effective_log_level" -lt 2 ]; then
+        effective_log_level=2 # Force at least verbose level 2 when --verbose is used
     fi
     local flags=()
     [ "$effective_log_level" -le 0 ] && flags+=(--quiet)
@@ -1412,20 +1415,20 @@ run_backup() {
     fi
 
     local snapshot_id=""
-    if grep -qE "snapshot [a-f0-9]+ saved" "$backup_log" 2>/dev/null; then
-        snapshot_id=$(grep -E -o "snapshot [a-f0-9]+ saved" "$backup_log" | tail -1 | awk '{print $2}')
+    if grep -qE "^snapshot [a-f0-9]+ saved$" "$backup_log" 2>/dev/null; then
+        snapshot_id=$(grep -E -o "^snapshot [a-f0-9]+ saved$" "$backup_log" | tail -1 | awk '{print $2}')
     elif [[ "$restic_status" -eq 0 || "$restic_status" -eq 3 ]]; then
         snapshot_id=$(restic snapshots --latest 1 --json --host "$HOSTNAME" 2>/dev/null | jq -r '.[0].id // empty' 2>/dev/null || true)
     fi
 
     local files_new files_changed files_unmodified
     local data_added data_processed
-    if grep -q "Files:" "$backup_log"; then
-        files_new=$(grep "Files:" "$backup_log" | tail -1 | awk '{print $2}')
-        files_changed=$(grep "Files:" "$backup_log" | tail -1 | awk '{print $4}')
-        files_unmodified=$(grep "Files:" "$backup_log" | tail -1 | awk '{print $6}')
-        data_added=$(grep "Added to the repository:" "$backup_log" | tail -1 | awk '{print $5" "$6}')
-        data_processed=$(grep "processed" "$backup_log" | tail -1 | awk '{print $2" "$3}' | tr -d ',')
+    if grep -qE "^Files:" "$backup_log"; then
+        files_new=$(grep -E "^Files:" "$backup_log" | tail -1 | awk '{print $2}' || true)
+        files_changed=$(grep -E "^Files:" "$backup_log" | tail -1 | awk '{print $4}' || true)
+        files_unmodified=$(grep -E "^Files:" "$backup_log" | tail -1 | awk '{print $6}' || true)
+        data_added=$(grep -E "^Added to the repository:" "$backup_log" | tail -1 | awk '{print $5" "$6}' || true)
+        data_processed=$(grep -E "^processed [0-9]+ files" "$backup_log" | tail -1 | awk '{print $2" "$3}' | tr -d ',' || true)
     fi
     cat "$backup_log" >> "$LOG_FILE"
     rm -f "$backup_log"
@@ -1985,6 +1988,7 @@ EOF
 
 # 1. Parse flags.
 VERBOSE_MODE=false
+VERY_VERBOSE_MODE=false
 SKIP_OWNERSHIP_FIX=false
 USE_FALLBACK=false
 AUTO_FIX_PERMS=${AUTO_FIX_PERMS:-false}
@@ -1992,6 +1996,11 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --verbose)
       VERBOSE_MODE=true
+      shift
+      ;;
+    --very-verbose)
+      VERBOSE_MODE=true
+      VERY_VERBOSE_MODE=true
       shift
       ;;
     --fallback)
